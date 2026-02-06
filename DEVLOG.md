@@ -3,14 +3,14 @@
 **Project:** SC Signature Scanner  
 **Location:** `C:\Users\larse\PycharmProjects\AREA52\SC_Signature_Scanner\`  
 **Developer:** Mallachi  
-**Current Version:** v3.2.0  
-**Development Period:** January 8-14, 2026
+**Current Version:** v3.4.0
+**Development Period:** January 8, 2026 - February 6, 2026
 
 ---
 
 ## Project Overview
 
-The SC Signature Scanner is a real-time target identification tool for Star Citizen. It monitors screenshots and uses OCR to detect signature values from the in-game HUD, then matches them against a database to identify asteroids, deposits, ships, and salvage targets.
+The SC Signature Scanner is a real-time target identification tool for Star Citizen. It monitors screenshots and uses OCR to detect signature values from the in-game HUD, then matches them against a database to identify asteroids, deposits, and salvage targets.
 
 ---
 
@@ -362,6 +362,35 @@ First OCR use:
 
 ## Version History
 
+### v3.4.0 (February 6, 2026)
+*Remove ship signatures, consolidate signature data to single source of truth*
+
+- **REMOVE:** Ship radar cross-section data (252 ships) from `combat_analyst_db.json` — unused dead data
+- **REMOVE:** `ship_lookup` builder from `scanner.py` — was building a lookup table that nothing consumed
+- **REFACTOR:** Consolidated signature values to single source of truth (`combat_analyst_db.json`)
+- Removed hardcoded module-level constants: `KNOWN_BASE_SIGNATURES`, `ROCK_DISPLAY_NAMES`, `SIGNATURE_TO_ROCK_TYPE`
+- All three are now derived from the JSON database in `_build_lookups()`
+- Salvage `signature_per_panel` now read from JSON instead of hardcoded `2000`
+- **CLEANUP:** Removed empty `_on_release()` method and unused event binding in `region_selector.py`
+- **CLEANUP:** Moved `import time` from local scope to module level in `splash.py`
+- **CLEANUP:** Initialized `_test_overlay` in `__init__` in `main.py`, removed `hasattr` guard
+- **RATIONALE:** Single source of truth means updating signature values only requires editing the JSON file — no code changes needed
+
+### v3.3.0 (February 6, 2026)
+*Signature value update for SC 4.5 + dead code cleanup*
+
+- **UPDATE:** All asteroid signature values updated (I-type 4000, C-type 4700, S-type 4720, P-type 4750, M-type 4850, Q-type 4870, E-type 4900)
+- **UPDATE:** All surface deposit signatures now 4000 (CIG bug — collides with I-type Asteroid)
+- **UPDATE:** Ground deposit signatures changed from 120/620 to 3000 for both variants (CIG bug)
+- **REMOVE:** Surface deposit entries from SIGNATURE_TO_ROCK_TYPE — cannot map individually when all share 4000
+- **CLEANUP:** Removed dead code: `_add_match_row()` in overlay.py, `_get_rock_value()` in scanner.py
+- **CLEANUP:** Removed unnecessary import guards: `HAS_PRICING`, `HAS_REGION_SELECTOR` (same-project modules, always present)
+- **CLEANUP:** Removed unused `get_release_notes()` from version_checker.py
+- **CLEANUP:** Removed `packaging` module fallback in version_checker.py — tuple comparison is sufficient
+- **CLEANUP:** Removed commented-out deferred dependencies from requirements.txt
+- **KNOWN ISSUE:** Signature 4000 collision means scanner cannot distinguish I-type asteroids from surface deposits
+- **NOTE:** Signature values may be corrected by CIG in SC 4.7 patch
+
 ### v3.2.0 (January 20, 2026)
 *UI improvements for refinery methods and tab styling*
 
@@ -467,6 +496,7 @@ First OCR use:
 | Startup splash screen | Torch/EasyOCR takes 15-20s to load; users need visual feedback that app is working |
 | Use `Any` for easyocr type hints | Type hints evaluate at class definition; if import fails, `easyocr.Reader` crashes |
 | Full scipy bundling over partial | Excluding scipy submodules breaks C extension loader; ~50-100MB size increase is acceptable for reliability |
+| JSON as single source of truth for signatures | Hardcoded Python constants duplicated JSON data and could drift; deriving from JSON means only one file to update |
 
 ---
 
@@ -474,15 +504,15 @@ First OCR use:
 
 ### Deferred to Future Releases
 - [ ] Tobii Eye Tracker integration
-- [ ] Ship signature matching (currently mining-focused)
+- [ ] Ship signature matching (removed in v3.4.0 — re-evaluate if needed)
 - [ ] Auto-detection as fallback to fixed region
 - [ ] Multi-monitor support testing
 - [ ] Localization for non-English clients
 
 ### Database Maintenance
-- Ground deposit signatures (120, 620) need periodic verification
+- All signatures need re-verification after SC 4.7 patch (CIG may fix 4000 collision and ground deposit values)
 - New deposit types may be added with SC patches
-- Ship signatures need complete extraction
+- Ship signatures removed in v3.4.0 — re-add if demand arises
 
 ---
 
@@ -505,7 +535,7 @@ First OCR use:
 
 ## Current Status / Next Steps
 
-**Status:** v3.2.0 - UI improvements for refinery methods and tab styling
+**Status:** v3.4.0 - Removed ship signatures, consolidated signature data to single source of truth
 
 **Immediate priorities:**
 1. ~~Fix About tab background color issue~~ ✓ (completed Jan 14)
@@ -524,10 +554,36 @@ First OCR use:
 14. ~~Fix easyocr import NameError crash~~ ✓ (completed Jan 16)
 15. Testing on fresh install
 
-**Blocking issues:** 
-- None
+**Blocking issues:**
+- Signature 4000 collision (I-type + all surface deposits) — CIG-side, awaiting SC 4.7 fix
 
 **Ready for:** Fresh install testing, distribution to testers
+
+**Session Log - February 6, 2026 (Session 13):**
+- **REMOVE:** Ship radar cross-section data (252 entries) from `combat_analyst_db.json` — dead data, never used in matching
+- **REMOVE:** `ship_lookup` builder in `scanner.py` — built a lookup table that was never queried
+- **REFACTOR:** Consolidated all signature values to single source of truth (`combat_analyst_db.json`)
+- Removed `KNOWN_BASE_SIGNATURES`, `ROCK_DISPLAY_NAMES`, `SIGNATURE_TO_ROCK_TYPE` module-level constants
+- Now derived dynamically from JSON in `_build_lookups()`
+- Salvage per-panel value now read from JSON instead of hardcoded
+- **CLEANUP:** Removed empty `_on_release()` + binding in `region_selector.py`
+- **CLEANUP:** Moved `import time` to module level in `splash.py`
+- **CLEANUP:** Initialized `_test_overlay` in `__init__`, simplified guard in `main.py`
+- **VERSION:** Bumped to v3.4.0 (also fixed version_checker.py which was still at 3.2.0)
+
+**Session Log - February 6, 2026 (Session 12):**
+- **UPDATE:** All signature values updated for SC 4.5 game changes
+- Asteroids: I=4000, C=4700, S=4720, P=4750, M=4850, Q=4870, E=4900
+- Surface deposits: All types now 4000 (collides with I-type — CIG bug)
+- Ground deposits: Both small and large now 3000 (were 120/620 — CIG bug)
+- Updated both `scanner.py` constants and `combat_analyst_db.json`
+- **CLEANUP:** Removed dead code across codebase
+- `overlay.py`: Removed unused `_add_match_row()` (~85 lines)
+- `scanner.py`: Removed unused `_get_rock_value()` (~11 lines)
+- `scanner.py`: Removed `HAS_PRICING`/`HAS_REGION_SELECTOR` import guards — direct imports for same-project modules
+- `version_checker.py`: Removed unused `get_release_notes()`, removed `packaging` module fallback
+- `requirements.txt`: Removed commented-out deferred dependencies (Tobii, systray, hotkeys)
+- **NOTE:** Signature values may be corrected in SC 4.7 — full re-verification needed when patch drops
 
 **Session Log - January 20, 2026 (Session 11):**
 - **IMPROVE:** Refinery method dropdown now displays yield, speed, and cost information
@@ -710,4 +766,4 @@ SC_Signature_Scanner/
 ---
 
 *Document generated: January 12, 2026*  
-*Last updated: January 20, 2026 - v3.2.0 UI improvements for refinery methods and tab styling*
+*Last updated: February 6, 2026 - v3.4.0 Remove ship signatures, consolidate to single source of truth*

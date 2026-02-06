@@ -8,16 +8,8 @@ import urllib.request
 import json
 from typing import Tuple, Optional
 
-# Try to use packaging for version comparison, fallback to simple string comparison
-try:
-    from packaging import version as pkg_version
-    HAS_PACKAGING = True
-except ImportError:
-    HAS_PACKAGING = False
-
-
 # Current version - update this with each release
-CURRENT_VERSION = "3.2.0"
+CURRENT_VERSION = "3.4.0"
 
 # GitHub repository info - UPDATE THESE when repo is created
 GITHUB_OWNER = "Diftic"
@@ -28,10 +20,7 @@ RELEASES_URL = f"https://api.github.com/repos/{GITHUB_OWNER}/{GITHUB_REPO}/relea
 
 
 def _parse_version_tuple(version_str: str) -> Tuple[int, ...]:
-    """
-    Parse a version string like '1.2.3' into a tuple (1, 2, 3).
-    Fallback for when packaging module is not available.
-    """
+    """Parse a version string like '1.2.3' into a tuple (1, 2, 3)."""
     try:
         parts = version_str.split('.')
         return tuple(int(p) for p in parts)
@@ -77,17 +66,8 @@ def check_for_updates(timeout: int = 5) -> Tuple[bool, Optional[str], Optional[s
         
         # Compare versions
         if latest_ver:
-            try:
-                if HAS_PACKAGING:
-                    is_newer = pkg_version.parse(latest_ver) > pkg_version.parse(CURRENT_VERSION)
-                else:
-                    # Simple tuple comparison for semantic versions
-                    is_newer = _parse_version_tuple(latest_ver) > _parse_version_tuple(CURRENT_VERSION)
-                return (is_newer, latest_ver, html_url)
-            except Exception:
-                # Version parsing failed, assume update if different
-                is_newer = latest_ver != CURRENT_VERSION
-                return (is_newer, latest_ver, html_url)
+            is_newer = _parse_version_tuple(latest_ver) > _parse_version_tuple(CURRENT_VERSION)
+            return (is_newer, latest_ver, html_url)
         
         return (False, None, None)
         
@@ -101,29 +81,4 @@ def check_for_updates(timeout: int = 5) -> Tuple[bool, Optional[str], Optional[s
     except Exception as e:
         print(f"Error checking for updates: {e}")
         return (False, None, None)
-
-
-def get_release_notes(timeout: int = 5) -> Optional[str]:
-    """
-    Get release notes for the latest version.
-    
-    Returns:
-        Release notes body text, or None if unavailable
-    """
-    try:
-        request = urllib.request.Request(
-            RELEASES_URL,
-            headers={
-                'User-Agent': f'SC-Signature-Scanner/{CURRENT_VERSION}',
-                'Accept': 'application/vnd.github.v3+json'
-            }
-        )
-        
-        with urllib.request.urlopen(request, timeout=timeout) as response:
-            data = json.loads(response.read().decode('utf-8'))
-        
-        return data.get('body', '')
-        
-    except Exception:
-        return None
 

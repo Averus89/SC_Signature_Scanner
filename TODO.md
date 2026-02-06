@@ -1,7 +1,7 @@
 # SC Signature Scanner - Status
 
-## Application Version: 3.2.0
-## Database Version: 4.5 (for Star Citizen 4.5)
+## Application Version: 3.4.0
+## Database Version: 4.6 (for Star Citizen 4.6)
 ## OCR Engine: EasyOCR (deep learning)
 
 ## Mining Categories
@@ -10,34 +10,29 @@
 Ship mining only (Prospector, MOLE). Mixed mineral composition.
 | Type | Signature |
 |------|-----------|
-| I-type | 1660 |
-| C-type | 1700 |
-| S-type | 1720 |
-| P-type | 1750 |
-| M-type | 1850 |
-| Q-type | 1870 |
-| E-type | 1900 |
+| I-type | 4000 |
+| C-type | 4700 |
+| S-type | 4720 |
+| P-type | 4750 |
+| M-type | 4850 |
+| Q-type | 4870 |
+| E-type | 4900 |
 
 ### Surface Deposits ✓
 Ship mining only (Prospector, MOLE). Mixed mineral composition.
+**Note:** All surface deposits share signature 4000 (same as I-type Asteroid). Cannot distinguish by signature alone. CIG bug as of SC 4.6.
 | Type | Signature |
 |------|-----------|
-| Shale | 1730 |
-| Felsic | 1770 |
-| Obsidian | 1790 |
-| Atacamite | 1800 |
-| Quartzite | 1820 |
-| Gneiss | 1840 |
-| Granite | 1920 |
-| Igneous | 1950 |
+| All types | 4000 |
 
 ### Ground Deposits ✓
 ROC or FPS mining. 100% single mineral per cluster.
+**Note:** Both variants share signature 3000. CIG bug as of SC 4.6.
 
 | Variant | Base Signature | Primary Method |
 |---------|----------------|----------------|
-| Small | 120 | FPS/Hand mining |
-| Large | 620 | ROC/Vehicle mining |
+| Small | 3000 | FPS/Hand mining |
+| Large | 3000 | ROC/Vehicle mining |
 
 **Minerals:** Hadanite, Dolivine, Aphorite, Beradom, Glacosite, Feynmaline, Jaclium
 
@@ -71,6 +66,12 @@ ROC or FPS mining. 100% single mineral per cluster.
 - [x] Regolith API integration (rock compositions from cache)
 - [x] Pricing integration reads from Regolith cache (single source of truth)
 - [x] Build script updated for PyInstaller _internal/ directory structure
+- [x] Signature values updated for SC 4.5
+- [x] Dead code cleanup (unused methods, unnecessary import guards)
+- [x] Removed ship signatures (radar cross-section data) from database
+- [x] Consolidated signature values to single source of truth (JSON database)
+- [x] Removed hardcoded constants (KNOWN_BASE_SIGNATURES, ROCK_DISPLAY_NAMES, SIGNATURE_TO_ROCK_TYPE)
+- [x] Minor cleanup: empty event handler, uninitialized attribute, local import
 
 ## In Progress
 - [ ] Testing on fresh install
@@ -83,8 +84,10 @@ ROC or FPS mining. 100% single mineral per cluster.
 - [x] Fixed NameError crash when easyocr import fails (type hint used `easyocr.Reader`)
 
 ## Known Issues
-- None currently identified
+- Signature 4000 collides: I-type Asteroid and all Surface Deposits are indistinguishable
+- Ground deposit variants (small/large) both share signature 3000
+- These are CIG-side bugs, may be fixed in SC 4.7
 
 ## Future Work
-- [ ] Full signature review after next major mining patch
+- [ ] Re-verify all signature values after SC 4.7 patch
 - [ ] GPU acceleration option for OCR (currently CPU-only)

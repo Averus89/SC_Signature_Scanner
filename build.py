@@ -6,6 +6,8 @@ Creates a standalone .exe distribution using PyInstaller.
 Author: Mallachi
 """
 
+import json
+import os
 import subprocess
 import shutil
 import sys
@@ -54,7 +56,6 @@ def main():
         print("ERROR: main.py not found. Run this script from the project directory.")
         sys.exit(1)
     
-    import os
     os.chdir(project_dir)
     print(f"Project: {project_dir}")
     
@@ -107,7 +108,16 @@ def main():
     if not db_file.exists():
         print(f"  ERROR: Database not found: {db_file}")
         sys.exit(1)
-    print(f"  ✓ Database file present")
+
+    # Read SC game version from database
+    sc_version = "unknown"
+    try:
+        with open(db_file, 'r', encoding='utf-8') as f:
+            db_meta = json.load(f).get('metadata', {})
+            sc_version = db_meta.get('sc_version', 'unknown')
+    except (json.JSONDecodeError, IOError):
+        pass
+    print(f"  ✓ Database file present (SC {sc_version})")
     
     # Check for deprecated files (warning only)
     deprecated_files = [
@@ -195,6 +205,7 @@ def main():
     print_header("BUILD COMPLETE")
     
     print(f"Version:     v{version}")
+    print(f"SC Version:  {sc_version}")
     print(f"Output:      {dist_dir}")
     print(f"Executable:  SC_Signature_Scanner.exe")
     print()
@@ -214,7 +225,6 @@ def main():
     
     # Open the dist folder (Windows)
     if sys.platform == "win32":
-        import os
         os.startfile(dist_dir)
 
 

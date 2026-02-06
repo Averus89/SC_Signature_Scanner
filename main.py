@@ -7,7 +7,7 @@ Monitor Star Citizen screenshots for signature values and identify targets.
 Features:
 - Monitors screenshot folder for new images
 - OCR detection of signature values
-- Identifies ships, asteroids, deposits from signature
+- Identifies asteroids, deposits from signature
 - Overlay popup with match results
 """
 
@@ -107,6 +107,7 @@ class SCSignatureScannerApp:
         self.scanner: Optional[SignatureScanner] = None
         self.monitor: Optional[ScreenshotMonitor] = None
         self.overlay: Optional[OverlayPopup] = None
+        self._test_overlay: Optional[OverlayPopup] = None
         
         # State
         self.is_monitoring = False
@@ -1397,7 +1398,7 @@ class SCSignatureScannerApp:
     
     def _test_popup(self):
         """Show a test popup at current position."""
-        if hasattr(self, '_test_overlay') and self._test_overlay:
+        if self._test_overlay:
             self._test_overlay.destroy()
         
         self._test_overlay = OverlayPopup(

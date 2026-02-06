@@ -12,7 +12,9 @@
       "WebFetch(domain:www.scminingmom.com)",
       "WebFetch(domain:www.mmopixel.com)",
       "WebFetch(domain:redmonstergaming.com)",
-      "WebFetch(domain:robertsspaceindustries.com)"
+      "WebFetch(domain:robertsspaceindustries.com)",
+      "Bash(grep:*)",
+      "Bash(python3:*)"
     ]
   }
 }

@@ -6,6 +6,7 @@ Shows immediately at startup while heavy modules load.
 
 import tkinter as tk
 import random
+import time
 
 
 class SplashScreen:
@@ -218,7 +219,6 @@ class SplashScreen:
 
     def pump(self, iterations: int = 10):
         """Pump the event loop to allow animations to run during blocking imports."""
-        import time
         for _ in range(iterations):
             try:
                 self.root.update()

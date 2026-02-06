@@ -21,18 +21,8 @@ import numpy as np
 
 import paths
 
-try:
-    import pricing
-    HAS_PRICING = True
-except ImportError:
-    HAS_PRICING = False
-
-# Import region selector for scan region
-try:
-    import region_selector
-    HAS_REGION_SELECTOR = True
-except ImportError:
-    HAS_REGION_SELECTOR = False
+import pricing
+import region_selector
 
 # EasyOCR import - lazy initialization
 HAS_EASYOCR = False
@@ -50,59 +40,6 @@ try:
 except ImportError as e:
     EASYOCR_ERROR = str(e)
     print(f"Warning: EasyOCR not installed. OCR disabled. Error: {e}")
-
-
-# Known base signatures for validation
-# Used to detect and correct OCR errors (phantom digits from comma/period separators)
-KNOWN_BASE_SIGNATURES = {
-    # Ground deposits
-    120, 620,
-    # Space deposits (asteroids)
-    1660, 1700, 1720, 1750, 1850, 1870, 1900,
-    # Surface deposits
-    1730, 1770, 1790, 1800, 1820, 1840, 1920, 1950,
-    # Salvage
-    2000,
-}
-
-
-# Display name mapping for short rock type codes
-ROCK_DISPLAY_NAMES = {
-    # Space deposits (asteroids)
-    'I': 'I-type Asteroid',
-    'C': 'C-type Asteroid',
-    'S': 'S-type Asteroid',
-    'P': 'P-type Asteroid',
-    'M': 'M-type Asteroid',
-    'Q': 'Q-type Asteroid',
-    'E': 'E-type Asteroid',
-}
-
-
-# Signature to rock type mapping for pricing
-# Space deposits (asteroids): Ship mining, mixed composition
-# Surface deposits: Ship mining, mixed composition  
-# Ground deposits: ROC/FPS mining, 100% single mineral (not in this map - handled separately)
-SIGNATURE_TO_ROCK_TYPE = {
-    # Space deposits (Asteroids)
-    1660: ('ITYPE', 'space_deposit'),
-    1700: ('CTYPE', 'space_deposit'),
-    1720: ('STYPE', 'space_deposit'),
-    1750: ('PTYPE', 'space_deposit'),
-    1850: ('MTYPE', 'space_deposit'),
-    1870: ('QTYPE', 'space_deposit'),
-    1900: ('ETYPE', 'space_deposit'),
-    # Surface deposits
-    1730: ('SHALE', 'surface_deposit'),
-    1770: ('FELSIC', 'surface_deposit'),
-    1790: ('OBSIDIAN', 'surface_deposit'),
-    1800: ('ATACAMITE', 'surface_deposit'),
-    1820: ('QUARTZITE', 'surface_deposit'),
-    1840: ('GNEISS', 'surface_deposit'),
-    1920: ('GRANITE', 'surface_deposit'),
-    1950: ('IGNEOUS', 'surface_deposit'),
-}
-
 
 class SignatureScanner:
     """Scans screenshots for signature values using EasyOCR."""
@@ -236,7 +173,7 @@ class SignatureScanner:
                 self.last_debug_info['debug_files'].append(f"{self._debug_prefix}00_original.png")
             
             # Check for fixed region
-            if HAS_REGION_SELECTOR and region_selector.is_configured():
+            if region_selector.is_configured():
                 result = self._scan_with_fixed_region(img, width, height)
                 if result:
                     self.last_debug_info['method'] = 'fixed_region'
@@ -451,52 +388,53 @@ class SignatureScanner:
         return {}
     
     def _build_lookups(self):
-        """Build lookup tables for fast matching."""
-        self.ship_lookup = {}
-        for ship in self.db.get('ships', []):
-            cs = ship.get('cross_section_m', {})
-            for axis in ['x', 'y', 'z']:
-                dim = cs.get(axis, 0)
-                if dim > 0:
-                    key = int(dim * 1000)
-                    if key not in self.ship_lookup:
-                        self.ship_lookup[key] = []
-                    self.ship_lookup[key].append({
-                        'name': ship['name'],
-                        'manufacturer': ship.get('manufacturer', ''),
-                        'dimension': dim,
-                        'axis': axis,
-                        'max_dimension': ship.get('max_dimension_m', 0)
-                    })
-        
+        """Build lookup tables for fast matching from the database."""
         self.signature_lookup = {}
         for sig_str, desc in self.db.get('signature_lookup', {}).items():
             try:
                 self.signature_lookup[int(sig_str)] = desc
             except ValueError:
                 pass
-        
+
+        minables = self.db.get('minables', {})
+
         # Build minable signatures from space deposits (asteroids) and surface deposits
         self.minable_signatures = {}
-        minables = self.db.get('minables', {})
-        
-        # Space deposits (asteroids) and surface deposits - ship mining
+        # Also build rock display names and signature-to-rock-type mapping
+        self.rock_display_names = {}
+        self.signature_to_rock_type = {}
+
         for category in ['space_deposits', 'surface_deposits']:
             items = minables.get(category, {})
             for name, sig in items.items():
-                if name.startswith('_'):  # Skip metadata fields
+                if name.startswith('_'):
                     continue
                 if isinstance(sig, (int, float)):
-                    self.minable_signatures[int(sig)] = {'name': name, 'category': category}
-        
-        # Ground deposits - new unified structure with small/large variants
+                    sig = int(sig)
+                    self.minable_signatures[sig] = {'name': name, 'category': category}
+
+                    if category == 'space_deposits':
+                        self.rock_display_names[name] = f'{name}-type Asteroid'
+                        self.signature_to_rock_type[sig] = (f'{name}TYPE', 'space_deposit')
+
+        # Ground deposits
         ground = minables.get('ground_deposits', {})
         small_config = ground.get('small', {})
         large_config = ground.get('large', {})
-        
+
         self.ground_deposit_small_base = small_config.get('_base_signature', 120)
         self.ground_deposit_large_base = large_config.get('_base_signature', 620)
         self.ground_deposit_minerals = ground.get('minerals', [])
+
+        # Salvage base signature
+        salvage = self.db.get('salvage', {})
+        self.salvage_per_panel = salvage.get('signature_per_panel', 2000)
+
+        # Known base signatures (collected from all sources) for OCR correction
+        self.known_base_signatures = set(self.signature_to_rock_type.keys())
+        self.known_base_signatures.add(self.ground_deposit_small_base)
+        self.known_base_signatures.add(self.ground_deposit_large_base)
+        self.known_base_signatures.add(self.salvage_per_panel)
     
     def _ocr_signature(self, img_array: np.ndarray) -> Tuple[List[int], str, float]:
         """OCR the image and extract signature numbers.
@@ -624,7 +562,7 @@ class SignatureScanner:
         Returns:
             True if value divides evenly by any known base (with reasonable count)
         """
-        for base in KNOWN_BASE_SIGNATURES:
+        for base in self.known_base_signatures:
             if value % base == 0:
                 count = value // base
                 if 1 <= count <= 100:  # Reasonable count range
@@ -670,7 +608,7 @@ class SignatureScanner:
             # Prefer candidate with lowest count (more realistic)
             # e.g., 7400 = 4× M-type (1850) is more likely than 7440 = 62× small ground (120)
             def min_count(v):
-                counts = [v // b for b in KNOWN_BASE_SIGNATURES if v % b == 0 and 1 <= v // b <= 100]
+                counts = [v // b for b in self.known_base_signatures if v % b == 0 and 1 <= v // b <= 100]
                 return min(counts) if counts else 999
             
             best = min(candidates, key=min_count)
@@ -693,9 +631,9 @@ class SignatureScanner:
                 'confidence': 1.0
             }
             
-            # Add estimated value and composition if pricing available
-            if HAS_PRICING and signature in SIGNATURE_TO_ROCK_TYPE:
-                rock_type, category = SIGNATURE_TO_ROCK_TYPE[signature]
+            # Add estimated value and composition
+            if signature in self.signature_to_rock_type:
+                rock_type, category = self.signature_to_rock_type[signature]
                 match_data['rock_type'] = rock_type
                 match_data['category'] = category
                 
@@ -708,9 +646,9 @@ class SignatureScanner:
             
             matches.append(match_data)
         
-        # Check for salvage (2000 per panel) - exact multiples only
-        if signature >= 2000 and signature % 2000 == 0:
-            panels = signature // 2000
+        # Check for salvage - exact multiples only
+        if signature >= self.salvage_per_panel and signature % self.salvage_per_panel == 0:
+            panels = signature // self.salvage_per_panel
             matches.append({
                 'type': 'salvage',
                 'name': f'Salvage ({panels} panels)',
@@ -770,7 +708,7 @@ class SignatureScanner:
                     
                     # Get display name (expand short codes like "C" to "C-type Asteroid")
                     raw_name = info['name']
-                    display_name = ROCK_DISPLAY_NAMES.get(raw_name, raw_name)
+                    display_name = self.rock_display_names.get(raw_name, raw_name)
                     if count > 1:
                         display_name = f"{display_name} (x{count})"
                     
@@ -783,9 +721,9 @@ class SignatureScanner:
                         'confidence': confidence
                     }
                     
-                    # Add estimated value and composition if pricing available
-                    if HAS_PRICING and base_sig in SIGNATURE_TO_ROCK_TYPE:
-                        rock_type, category = SIGNATURE_TO_ROCK_TYPE[base_sig]
+                    # Add estimated value and composition
+                    if base_sig in self.signature_to_rock_type:
+                        rock_type, category = self.signature_to_rock_type[base_sig]
                         match_data['rock_type'] = rock_type
                         match_data['category'] = category
                         
@@ -811,18 +749,6 @@ class SignatureScanner:
         
         return unique
     
-    def _get_rock_value(self, rock_type: str) -> float:
-        """Get estimated value for a rock type using pricing system."""
-        if not HAS_PRICING:
-            return 0
-        
-        try:
-            manager = pricing.get_pricing_manager()
-            value, _ = manager.calculate_rock_value(self.system, rock_type)
-            return value
-        except Exception:
-            return 0
-    
     def _get_rock_value_and_composition(self, rock_type: str) -> Tuple[float, List[Dict]]:
         """Get estimated value and mineral composition for a rock type.
         
@@ -833,9 +759,6 @@ class SignatureScanner:
         Note: Value is calculated assuming the mineral spawns (based on medPct only,
         not probability). This gives the user the value IF that mineral appears.
         """
-        if not HAS_PRICING:
-            return 0, []
-        
         try:
             manager = pricing.get_pricing_manager()
             

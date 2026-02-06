@@ -249,7 +249,6 @@ class RegionSelector:
         # Bindings
         self.canvas.bind('<Button-1>', self._on_press)
         self.canvas.bind('<B1-Motion>', self._on_drag)
-        self.canvas.bind('<ButtonRelease-1>', self._on_release)
         
         # Make modal if has parent
         if self.parent:
@@ -297,10 +296,6 @@ class RegionSelector:
         )
         
         self._update_info()
-    
-    def _on_release(self, event):
-        """Handle mouse release."""
-        pass
     
     def _draw_rect(self, x1: int, y1: int, x2: int, y2: int):
         """Draw selection rectangle."""
