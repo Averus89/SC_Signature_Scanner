@@ -3,7 +3,7 @@
 **Project:** SC Signature Scanner  
 **Location:** `C:\Users\larse\PycharmProjects\AREA52\SC_Signature_Scanner\`  
 **Developer:** Mallachi  
-**Current Version:** v4.2.1
+**Current Version:** v4.2.1 — Released
 **Development Period:** January 8, 2026 - ongoing
 
 ---
@@ -48,6 +48,20 @@ The devlog shall always contain a clear "Current Status" or "Next Steps" section
 ---
 
 ## Changelog
+
+### 2026-03-18 — v4.2.1 patch: UI polish + build fix (post-release)
+
+**Changes after initial v4.2.1 release:**
+- `overlay.py`: Target name in popup header now always green (`#3fb950`)
+- `overlay.py`: Removed redundant "Dominant mineral:" label (name already shown in header)
+- `main.py`: Test popup updated to SC 4.7 example — Torite (Uncommon) sig 3900
+- `main.py`: Added memorial label in header: "✦ In memory of Regolith.Rocks — The Industrial Community"
+- `build.py`: Fixed `UnicodeEncodeError` crash on Windows CP1252 console — added `sys.stdout.reconfigure(encoding='utf-8')` at startup
+- `build.py`: Removed stale Regolith API references from runtime file summary
+
+**Released:** v4.2.1 pushed to GitHub, exe attached to release.
+
+---
 
 ### 2026-03-18 — v4.2.1: Overlay label corrections (PTU data reconciliation)
 

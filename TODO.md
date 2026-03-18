@@ -91,6 +91,7 @@ ROC or FPS mining. 100% single mineral per cluster.
 
 ## In Progress
 - [ ] Testing on fresh install
+- [ ] Awaiting user feedback on v4.2.1 release
 
 ## Completed Recently
 - [x] Removed Regolith API + UEX pricing system — v4.2.0 (SC 4.7 deposits are single-mineral, no composition needed)

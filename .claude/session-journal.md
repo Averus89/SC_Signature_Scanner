@@ -3,10 +3,17 @@
 A living journal that persists across compactions. Captures decisions, progress, and context.
 
 ## Current State
-- **Focus:** Pre-release — committing v4.2.1 (overlay label corrections + SC 4.7 upgrade)
+- **Focus:** v4.2.1 released — awaiting user feedback
 - **Blocked:** nothing
 
 ## Log
+
+### 2026-03-18 — Completed: v4.2.1 released to GitHub
+- Exe built (38.9 MB, PyInstaller 6.19), attached to GitHub release tag v4.2.1
+- Build script fixed: UTF-8 stdout reconfigure to prevent Windows CP1252 crash
+- Regolith.Rocks memorial added to app header
+- Green name labels in overlay, redundant "Dominant mineral:" label removed
+- Test popup updated to SC 4.7 Torite example
 
 ### 2026-03-18 — Completed: v4.2.1 overlay label corrections
 - Fixed "100% pure mineral" overlay labels for ship mining (PTU data: dominant mineral 40-80%, not guaranteed pure)
