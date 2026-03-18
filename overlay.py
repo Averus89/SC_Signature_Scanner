@@ -199,7 +199,7 @@ class OverlayPopup:
             header_row,
             text=f"{icon} {name}",
             font=self._scaled_font("Segoe UI", 12, "bold"),
-            fg=color,
+            fg="#3fb950",
             bg=self.BG_COLOR,
             anchor=tk.W
         )
@@ -263,23 +263,7 @@ class OverlayPopup:
             info_row.pack(fill=tk.X, pady=(int(5 * self.scale), 0))
 
             if mineral_known:
-                # Known mineral — show definitively
-                tk.Label(
-                    info_row,
-                    text="Dominant mineral:",
-                    font=self._scaled_font("Consolas", 9),
-                    fg=self.MUTED_COLOR,
-                    bg=self.BG_LIGHT,
-                    padx=10
-                ).pack(anchor=tk.W, pady=(5, 0))
-                tk.Label(
-                    info_row,
-                    text=match.get('mineral', ''),
-                    font=self._scaled_font("Consolas", 11, "bold"),
-                    fg="#3fb950",
-                    bg=self.BG_LIGHT,
-                    padx=10
-                ).pack(anchor=tk.W, pady=(0, 5))
+                pass
             elif possible_minerals:
                 minerals_text = ", ".join(possible_minerals[:5])  # Show first 5
                 if len(possible_minerals) > 5:

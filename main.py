@@ -160,6 +160,15 @@ class SCSignatureScannerApp:
             font=fonts['small']
         )
         subtitle.pack(anchor=tk.W)
+
+        memorial = tk.Label(
+            title_text,
+            text="✦ In memory of Regolith.Rocks — The Industrial Community",
+            bg=colors['bg_dark'],
+            fg=colors['text_muted'],
+            font=('Segoe UI', 7, 'italic')
+        )
+        memorial.pack(anchor=tk.W)
         
         # Accent line
         accent_line = tk.Frame(header, bg=colors['accent_primary'], height=2)
@@ -1251,14 +1260,15 @@ class SCSignatureScannerApp:
             scale=self.scale_var.get(),
         )
         
-        test_signature = 4900
+        test_signature = 3900
 
         test_matches = [{
-            'type': 'known',
-            'name': 'E-type Asteroid',
-            'category': 'asteroid',
-            'rock_type': 'ETYPE',
-            'signature': 4900,
+            'type': 'ship_mining',
+            'name': 'Torite (Uncommon)',
+            'category': 'ship_mining',
+            'mineral': 'Torite',
+            'tier': 'uncommon',
+            'signature': 3900,
             'confidence': 1.0,
         }]
         
