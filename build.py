@@ -13,6 +13,10 @@ import shutil
 import sys
 from pathlib import Path
 
+# Force UTF-8 output so checkmark/warning characters render on Windows console
+if hasattr(sys.stdout, "reconfigure"):
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+
 # Require Python 3.13+
 if sys.version_info < (3, 13):
     print(f"ERROR: Python 3.13+ required, got {sys.version.split()[0]}")
@@ -222,9 +226,8 @@ def main():
     print("  data/combat_analyst_db.json")
     print()
     print("Runtime files (created next to exe on first use):")
-    print("  config.json              — user settings + Regolith API key")
+    print("  config.json              — user settings")
     print("  scan_region.json         — scan region config")
-    print("  regolith_cache.json      — Regolith.rocks price cache")
     print("  SignatureScannerBugreport/ — debug screenshots")
     print()
     print("Distribution:")
