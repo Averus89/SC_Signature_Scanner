@@ -1,4 +1,4 @@
-#!/usr/bin/env python3
+#!/usr/bin/env python
 """
 Build script for SC Signature Scanner.
 Creates a standalone .exe distribution using PyInstaller.
@@ -12,6 +12,11 @@ import subprocess
 import shutil
 import sys
 from pathlib import Path
+
+# Require Python 3.13+
+if sys.version_info < (3, 13):
+    print(f"ERROR: Python 3.13+ required, got {sys.version.split()[0]}")
+    sys.exit(1)
 
 
 def print_header(text: str):
@@ -34,7 +39,7 @@ def run_command(cmd: list, description: str) -> bool:
     try:
         result = subprocess.run(cmd, check=True, capture_output=True, text=True)
         if result.stdout:
-            for line in result.stdout.strip().split('\n'):
+            for line in result.stdout.strip().split("\n"):
                 print(f"    {line}")
         return True
     except subprocess.CalledProcessError as e:
@@ -49,29 +54,30 @@ def run_command(cmd: list, description: str) -> bool:
 
 def main():
     print_header("SC Signature Scanner - Build Script")
-    
+
     # Ensure we're in the right directory
     project_dir = Path(__file__).parent
     if not (project_dir / "main.py").exists():
         print("ERROR: main.py not found. Run this script from the project directory.")
         sys.exit(1)
-    
+
     os.chdir(project_dir)
-    print(f"Project: {project_dir}")
-    
-    # Get version
+    print(f"Project:  {project_dir}")
+    print(f"Python:   {sys.version.split()[0]}  ({sys.executable})")
+
+    # Get app version
     try:
+        sys.path.insert(0, str(project_dir))
         import version_checker
         version = version_checker.CURRENT_VERSION
-        print(f"Version: {version}")
+        print(f"App:      v{version}")
     except ImportError:
         version = "unknown"
-        print("Warning: Could not determine version")
-    
+        print("Warning: Could not determine version (version_checker.py missing)")
+
     # ===== Pre-build Checks =====
     print_section("Pre-build Checks")
-    
-    # Required source files
+
     required_files = [
         "main.py",
         "scanner.py",
@@ -88,67 +94,67 @@ def main():
         "requirements.txt",
         "SC_Signature_Scanner.spec",
     ]
-    
-    missing = []
-    for filename in required_files:
-        filepath = project_dir / filename
-        if not filepath.exists():
-            missing.append(filename)
-    
+
+    missing = [f for f in required_files if not (project_dir / f).exists()]
     if missing:
-        print(f"  ERROR: Missing required files:")
+        print("  ERROR: Missing required files:")
         for f in missing:
             print(f"    - {f}")
         sys.exit(1)
     print(f"  ✓ All {len(required_files)} required source files present")
-    
-    # Required data files
+
+    # Database
     data_dir = project_dir / "data"
     db_file = data_dir / "combat_analyst_db.json"
     if not db_file.exists():
         print(f"  ERROR: Database not found: {db_file}")
         sys.exit(1)
 
-    # Read SC game version from database
     sc_version = "unknown"
     try:
-        with open(db_file, 'r', encoding='utf-8') as f:
-            db_meta = json.load(f).get('metadata', {})
-            sc_version = db_meta.get('sc_version', 'unknown')
+        with open(db_file, "r", encoding="utf-8") as f:
+            sc_version = json.load(f).get("metadata", {}).get("sc_version", "unknown")
     except (json.JSONDecodeError, IOError):
         pass
-    print(f"  ✓ Database file present (SC {sc_version})")
-    
-    # Check for deprecated files (warning only)
+    print(f"  ✓ Database present (SC {sc_version})")
+
+    # Windows shell artifacts — abort if present (they'd get bundled)
+    shell_artifacts = [project_dir / "nul", project_dir / "nul.txt"]
+    found_artifacts = [p for p in shell_artifacts if p.exists()]
+    if found_artifacts:
+        print(f"  ⚠ Warning: Shell artifacts found — run clean.py first:")
+        for p in found_artifacts:
+            print(f"    - {p.name}")
+
+    # Deprecated source files — warn only
     deprecated_files = [
         "hud_calibration.py",
         "identifier_window.py",
         "jxr_converter.py",
         "tobii_tracker.py",
     ]
-    
-    found_deprecated = []
-    for filename in deprecated_files:
-        if (project_dir / filename).exists():
-            found_deprecated.append(filename)
-    
+    found_deprecated = [f for f in deprecated_files if (project_dir / f).exists()]
     if found_deprecated:
-        print(f"  ⚠ Warning: Deprecated files found (run clean.py first):")
+        print("  ⚠ Warning: Deprecated files found — run clean.py first:")
         for f in found_deprecated:
             print(f"    - {f}")
-    
+
     # ===== Clean Previous Builds =====
     print_section("Cleaning Previous Builds")
-    
-    for folder in ["build", "dist"]:
+
+    cleaned_any = False
+    for folder in ("build", "dist"):
         path = project_dir / folder
         if path.exists():
             shutil.rmtree(path)
             print(f"  Removed: {folder}/")
-    
+            cleaned_any = True
+    if not cleaned_any:
+        print("  (nothing to clean)")
+
     # ===== Check PyInstaller =====
     print_section("PyInstaller")
-    
+
     try:
         import PyInstaller
         print(f"  ✓ PyInstaller {PyInstaller.__version__} found")
@@ -157,73 +163,76 @@ def main():
         if not run_command([sys.executable, "-m", "pip", "install", "pyinstaller"], "Installing"):
             print("  ERROR: Failed to install PyInstaller")
             sys.exit(1)
-    
+
     # ===== Build =====
     print_header("Building Executable")
-    
+
     spec_file = project_dir / "SC_Signature_Scanner.spec"
-    
     result = subprocess.run(
         [sys.executable, "-m", "PyInstaller", str(spec_file), "--noconfirm"],
-        cwd=project_dir
+        cwd=project_dir,
     )
-    
+
     if result.returncode != 0:
         print_header("BUILD FAILED")
         sys.exit(1)
-    
+
     # ===== Verify Output =====
     print_section("Verifying Build")
-    
+
     dist_dir = project_dir / "dist" / "SC_Signature_Scanner"
     exe_file = dist_dir / "SC_Signature_Scanner.exe"
-    # PyInstaller puts data files in _internal/ subdirectory
+    # PyInstaller >=6 places bundled data in _internal/
     internal_dir = dist_dir / "_internal"
-    data_dir_dist = internal_dir / "data"
-    db_file_dist = data_dir_dist / "combat_analyst_db.json"
-    
+    db_file_dist = internal_dir / "data" / "combat_analyst_db.json"
+
     errors = []
-    
+
     if not exe_file.exists():
-        errors.append("Executable not found")
+        errors.append("SC_Signature_Scanner.exe not found in dist/")
     else:
         size_mb = exe_file.stat().st_size / (1024 * 1024)
         print(f"  ✓ Executable: {exe_file.name} ({size_mb:.1f} MB)")
-    
-    if not db_file_dist.exists():
-        errors.append("Database file not bundled")
+
+    if not internal_dir.exists():
+        errors.append("_internal/ directory missing — PyInstaller layout changed?")
     else:
-        print(f"  ✓ Database: data/combat_analyst_db.json")
-    
+        print(f"  ✓ _internal/ directory present")
+
+    if not db_file_dist.exists():
+        errors.append("_internal/data/combat_analyst_db.json not bundled")
+    else:
+        print(f"  ✓ Database: _internal/data/combat_analyst_db.json")
+
     if errors:
-        print("\n  Errors:")
+        print("\n  Build errors:")
         for e in errors:
             print(f"    ✗ {e}")
         sys.exit(1)
-    
+
     # ===== Summary =====
     print_header("BUILD COMPLETE")
-    
-    print(f"Version:     v{version}")
-    print(f"SC Version:  {sc_version}")
+
+    print(f"App version: v{version}")
+    print(f"SC version:  {sc_version}")
+    print(f"Python:      {sys.version.split()[0]}")
     print(f"Output:      {dist_dir}")
-    print(f"Executable:  SC_Signature_Scanner.exe")
     print()
-    print("Bundled files:")
-    print("  - data/combat_analyst_db.json")
+    print("Bundled (in _internal/):")
+    print("  data/combat_analyst_db.json")
     print()
-    print("Runtime files (created on first use):")
-    print("  - config.json              (user settings + API key)")
-    print("  - scan_region.json         (scan region config)")
-    print("  - regolith_cache.json      (Regolith.rocks cache)")
-    print("  - SignatureScannerBugreport/  (debug output)")
+    print("Runtime files (created next to exe on first use):")
+    print("  config.json              — user settings + Regolith API key")
+    print("  scan_region.json         — scan region config")
+    print("  regolith_cache.json      — Regolith.rocks price cache")
+    print("  SignatureScannerBugreport/ — debug screenshots")
     print()
     print("Distribution:")
-    print("  Copy the entire SC_Signature_Scanner folder.")
-    print("  Users run SC_Signature_Scanner.exe")
+    print("  Zip the entire SC_Signature_Scanner/ folder.")
+    print("  Users extract and run SC_Signature_Scanner.exe")
     print()
-    
-    # Open the dist folder (Windows)
+
+    # Open dist folder on Windows
     if sys.platform == "win32":
         os.startfile(dist_dir)
 

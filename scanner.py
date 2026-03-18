@@ -15,13 +15,18 @@ import json
 import re
 from datetime import datetime
 from pathlib import Path
-from typing import Dict, List, Any, Optional, Tuple
+from typing import Callable, Dict, List, Any, Optional, Tuple
 from PIL import Image
 import numpy as np
 
+try:
+    import cv2
+    HAS_CV2 = True
+except ImportError:
+    HAS_CV2 = False
+
 import paths
 
-import pricing
 import region_selector
 
 # EasyOCR import - lazy initialization
@@ -44,9 +49,8 @@ except ImportError as e:
 class SignatureScanner:
     """Scans screenshots for signature values using EasyOCR."""
     
-    def __init__(self, db_path: Path, system: str = 'STANTON'):
+    def __init__(self, db_path: Path):
         self.db = self._load_database(db_path)
-        self.system = system.upper()  # Default system for pricing
         self._build_lookups()
         
         self.debug_mode = False
@@ -60,8 +64,8 @@ class SignatureScanner:
         self._ocr_init_error: Optional[str] = None
         
         # Callback for model download progress (set by UI)
-        self.on_model_download_start: Optional[callable] = None
-        self.on_model_download_complete: Optional[callable] = None
+        self.on_model_download_start: Optional[Callable[[], None]] = None
+        self.on_model_download_complete: Optional[Callable[[], None]] = None
     
     def _get_ocr_reader(self) -> Optional[Any]:
         """Get or initialize the EasyOCR reader.
@@ -286,8 +290,6 @@ class SignatureScanner:
         Returns:
             Numpy array (RGB) ready for EasyOCR
         """
-        import cv2
-        
         # Ensure RGB
         if img.mode != 'RGB':
             img = img.convert('RGB')
@@ -323,8 +325,6 @@ class SignatureScanner:
         Returns:
             Cleaned RGB numpy array with small components removed
         """
-        import cv2
-        
         # Convert to grayscale
         gray = cv2.cvtColor(img_array, cv2.COLOR_RGB2GRAY)
         
@@ -404,18 +404,28 @@ class SignatureScanner:
         self.rock_display_names = {}
         self.signature_to_rock_type = {}
 
-        for category in ['space_deposits', 'surface_deposits']:
-            items = minables.get(category, {})
-            for name, sig in items.items():
-                if name.startswith('_'):
+        # SC 4.7+ per-mineral signature system.
+        # Each tier (legendary/epic/rare/uncommon/common) contains {mineral: signature} pairs.
+        # The signature uniquely identifies the mineral — applies to both asteroids and surface rocks.
+        ship_mining = minables.get('ship_mining', {})
+        for tier, tier_data in ship_mining.items():
+            if tier.startswith('_') or not isinstance(tier_data, dict):
+                continue
+            for mineral, sig in tier_data.items():
+                if mineral.startswith('_'):
                     continue
                 if isinstance(sig, (int, float)):
                     sig = int(sig)
-                    self.minable_signatures[sig] = {'name': name, 'category': category}
-
-                    if category == 'space_deposits':
-                        self.rock_display_names[name] = f'{name}-type Asteroid'
-                        self.signature_to_rock_type[sig] = (f'{name}TYPE', 'space_deposit')
+                    display = f'{mineral} ({tier.capitalize()})'
+                    self.minable_signatures[sig] = {
+                        'name': display,
+                        'mineral': mineral,
+                        'tier': tier,
+                        'category': 'ship_mining',
+                    }
+                    self.rock_display_names[mineral] = display
+                    # Rock type key for pricing lookup (mineral name, uppercase)
+                    self.signature_to_rock_type[sig] = (mineral.upper(), 'ship_mining')
 
         # Ground deposits
         ground = minables.get('ground_deposits', {})
@@ -426,15 +436,26 @@ class SignatureScanner:
         self.ground_deposit_large_base = large_config.get('_base_signature', 620)
         self.ground_deposit_minerals = ground.get('minerals', [])
 
-        # Salvage base signature
+        # Salvage — panels and debris types
         salvage = self.db.get('salvage', {})
-        self.salvage_per_panel = salvage.get('signature_per_panel', 2000)
+        panels_config = salvage.get('panels', {})
+        self.salvage_per_panel = panels_config.get('_base_signature', 2000)
+
+        # Debris types: list of (base_sig, display_name)
+        self.salvage_debris_types: list[tuple[int, str]] = []
+        for debris_data in salvage.get('debris', {}).values():
+            base_sig = debris_data.get('_base_signature', 0)
+            name = debris_data.get('_name', 'Wreck Debris')
+            if base_sig > 0:
+                self.salvage_debris_types.append((base_sig, name))
 
         # Known base signatures (collected from all sources) for OCR correction
         self.known_base_signatures = set(self.signature_to_rock_type.keys())
         self.known_base_signatures.add(self.ground_deposit_small_base)
         self.known_base_signatures.add(self.ground_deposit_large_base)
         self.known_base_signatures.add(self.salvage_per_panel)
+        for base_sig, _ in self.salvage_debris_types:
+            self.known_base_signatures.add(base_sig)
     
     def _ocr_signature(self, img_array: np.ndarray) -> Tuple[List[int], str, float]:
         """OCR the image and extract signature numbers.
@@ -494,32 +515,32 @@ class SignatureScanner:
         Returns:
             List of valid signature integers
         """
-        raw_values = []
-        
+        seen: set[int] = set()
+        raw_values: list[int] = []
+
+        def _add(value: int) -> None:
+            if self._is_valid_signature(value) and value not in seen:
+                seen.add(value)
+                raw_values.append(value)
+
         # Pattern 1: Numbers with comma separators (e.g., "1,850")
         for match in re.findall(r'(\d{1,3},\d{3})', text):
             try:
-                value = int(match.replace(',', ''))
-                if self._is_valid_signature(value) and value not in raw_values:
-                    raw_values.append(value)
+                _add(int(match.replace(',', '')))
             except ValueError:
                 pass
-        
+
         # Pattern 2: Numbers with period separators (e.g., "6.000" - European format or OCR misread)
         for match in re.findall(r'(\d{1,3}\.\d{3})', text):
             try:
-                value = int(match.replace('.', ''))
-                if self._is_valid_signature(value) and value not in raw_values:
-                    raw_values.append(value)
+                _add(int(match.replace('.', '')))
             except ValueError:
                 pass
-        
+
         # Pattern 3: Plain numbers (e.g., "1850" or "74400")
         for match in re.findall(r'(\d{3,6})', text):
             try:
-                value = int(match)
-                if self._is_valid_signature(value) and value not in raw_values:
-                    raw_values.append(value)
+                _add(int(match))
             except ValueError:
                 pass
         
@@ -631,31 +652,39 @@ class SignatureScanner:
                 'confidence': 1.0
             }
             
-            # Add estimated value and composition
             if signature in self.signature_to_rock_type:
                 rock_type, category = self.signature_to_rock_type[signature]
                 match_data['rock_type'] = rock_type
                 match_data['category'] = category
-                
-                # Get value and composition
-                est_value, composition = self._get_rock_value_and_composition(rock_type)
-                if est_value > 0:
-                    match_data['est_value'] = int(est_value)
-                if composition:
-                    match_data['composition'] = composition
-            
+
             matches.append(match_data)
         
-        # Check for salvage - exact multiples only
+        # Check for salvage panels — exact multiples of 2000
         if signature >= self.salvage_per_panel and signature % self.salvage_per_panel == 0:
             panels = signature // self.salvage_per_panel
             matches.append({
                 'type': 'salvage',
-                'name': f'Salvage ({panels} panels)',
+                'category': 'salvage',
+                'name': f'Salvage Panels ({panels}×)',
                 'panels': panels,
                 'signature': signature,
-                'confidence': 1.0  # Exact match - definitive
+                'confidence': 1.0,
             })
+
+        # Check for salvage debris types (sized hull pieces from SC 4.7)
+        for base_sig, debris_name in self.salvage_debris_types:
+            if signature >= base_sig and signature % base_sig == 0:
+                count = signature // base_sig
+                if 1 <= count <= 20:
+                    matches.append({
+                        'type': 'salvage_debris',
+                        'category': 'salvage_debris',
+                        'name': f'{debris_name} ({count}×)',
+                        'count': count,
+                        'base_signature': base_sig,
+                        'signature': signature,
+                        'confidence': 1.0,
+                    })
         
         # Check for ground deposits (small=120, large=620)
         # These are 100% single mineral per cluster
@@ -697,42 +726,32 @@ class SignatureScanner:
                     'possible_minerals': self.ground_deposit_minerals.copy()
                 })
         
-        # Check space deposits (asteroids) and surface deposits
+        # Check ship-mined deposits (asteroids and surface rocks — per-mineral signatures)
         for base_sig, info in self.minable_signatures.items():
             if base_sig == 0:
                 continue
             if signature % base_sig == 0:
                 count = signature // base_sig
                 if 1 <= count <= 100:
-                    confidence = 0.9 if count == 1 else max(0.5, 0.85 - count * 0.01)
-                    
-                    # Get display name (expand short codes like "C" to "C-type Asteroid")
-                    raw_name = info['name']
-                    display_name = self.rock_display_names.get(raw_name, raw_name)
+                    confidence = 1.0 if count == 1 else max(0.5, 0.9 - count * 0.01)
+
+                    display_name = info['name']
                     if count > 1:
-                        display_name = f"{display_name} (x{count})"
-                    
+                        display_name = f"{display_name} ×{count}"
+
                     match_data = {
-                        'type': info['category'],
+                        'type': 'ship_mining',
+                        'category': 'ship_mining',
                         'name': display_name,
+                        'mineral': info.get('mineral', info['name']),
+                        'tier': info.get('tier', ''),
                         'count': count,
                         'base_signature': base_sig,
                         'signature': signature,
-                        'confidence': confidence
+                        'confidence': confidence,
+                        'single_mineral': True,
                     }
-                    
-                    # Add estimated value and composition
-                    if base_sig in self.signature_to_rock_type:
-                        rock_type, category = self.signature_to_rock_type[base_sig]
-                        match_data['rock_type'] = rock_type
-                        match_data['category'] = category
-                        
-                        est_value, composition = self._get_rock_value_and_composition(rock_type)
-                        if est_value > 0:
-                            match_data['est_value'] = int(est_value * count)
-                        if composition:
-                            match_data['composition'] = composition
-                    
+
                     matches.append(match_data)
         
         # Sort by confidence
@@ -749,80 +768,7 @@ class SignatureScanner:
         
         return unique
     
-    def _get_rock_value_and_composition(self, rock_type: str) -> Tuple[float, List[Dict]]:
-        """Get estimated value and mineral composition for a rock type.
-        
-        Returns:
-            Tuple of (total_value, composition_list)
-            composition_list contains dicts with: name, prob, medPct, value, price
-            
-        Note: Value is calculated assuming the mineral spawns (based on medPct only,
-        not probability). This gives the user the value IF that mineral appears.
-        """
-        try:
-            manager = pricing.get_pricing_manager()
-            
-            # Get rock data
-            system_data = manager.rock_types.get(self.system, {})
-            rock_data = system_data.get(rock_type)
-            
-            if not rock_data:
-                return 0, []
-            
-            # Get mass and yield
-            mass = rock_data.get('mass', {}).get('med', 0)
-            yield_factor = manager.refinery_yield
-            
-            # Build composition list
-            ores = rock_data.get('ores', {})
-            composition = []
-            total_value = 0
-            
-            for ore_name, ore_data in ores.items():
-                if ore_name == 'INERTMATERIAL':
-                    continue  # Skip inert
-                
-                prob = ore_data.get('prob', 0)
-                med_pct = ore_data.get('medPct', 0)
-                
-                if prob > 0 and med_pct > 0:
-                    # Get price and density for this ore
-                    price_per_scu = manager.get_ore_price(ore_name)
-                    density = pricing.MINERAL_DENSITY.get(ore_name.upper(), 100.0)
-                    
-                    # Calculate value IF mineral spawns (median only, no probability)
-                    # mineral_mass = deposit_mass × medPct
-                    # mineral_volume = mineral_mass / density
-                    # value = mineral_volume × price × refinery_yield
-                    if price_per_scu > 0 and density > 0:
-                        mineral_mass = mass * med_pct
-                        mineral_volume = mineral_mass / density
-                        ore_value = mineral_volume * price_per_scu * yield_factor
-                    else:
-                        ore_value = 0
-                    
-                    composition.append({
-                        'name': ore_name.capitalize(),
-                        'prob': prob,
-                        'medPct': med_pct,
-                        'value': int(ore_value) if ore_value else 0,
-                        'price': price_per_scu
-                    })
-                    
-                    # For total, use probability-weighted value
-                    total_value += ore_value * prob
-            
-            # Sort by price per SCU (highest value minerals first)
-            composition.sort(key=lambda x: x.get('price', 0), reverse=True)
-            
-            return total_value, composition
-            
-        except Exception as e:
-            if self.debug_mode:
-                print(f"[DEBUG] Error getting composition: {e}")
-            return 0, []
-    
-    def enable_debug(self, enable: bool = True, output_dir: Path = None):
+    def enable_debug(self, enable: bool = True, output_dir: Optional[Path] = None):
         """Enable debug mode."""
         self.debug_mode = enable
         if output_dir:

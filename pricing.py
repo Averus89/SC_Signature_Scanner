@@ -10,6 +10,7 @@ import urllib.error
 from typing import Dict, Optional, Tuple, List
 from pathlib import Path
 
+import paths
 import regolith_api
 
 
@@ -52,8 +53,8 @@ MINERAL_DENSITY = {
 class PricingManager:
     """Manages ore pricing data from UEX and rock composition from Regolith."""
     
-    def __init__(self, data_dir: str = "data"):
-        self.data_dir = Path(data_dir)
+    def __init__(self, data_dir: Path = None):
+        self.data_dir = data_dir if data_dir is not None else paths.get_user_data_path() / "data"
         self.cache_file = self.data_dir / "uex_prices.json"
         
         # Data stores

@@ -22,7 +22,6 @@ _splash = show_splash()
 _splash.set_status("Loading core modules...")
 import json
 import threading
-import time
 import tkinter as tk
 from tkinter import ttk, filedialog, messagebox
 from pathlib import Path
@@ -69,12 +68,8 @@ from config import Config
 from theme import RegolithTheme, WarningBanner, UpdateBanner, StatusIndicator
 _splash.pump(10)
 
-_splash.set_status("Loading pricing data...")
-import pricing
-_splash.pump(5)
 import version_checker
 import region_selector
-import regolith_api
 _splash.pump(10)
 
 
@@ -114,8 +109,6 @@ class SCSignatureScannerApp:
         self.processed_files = set()
         self.overlay_position: Optional[Tuple[int, int]] = None
         self.screenshot_count = 0
-        self.regolith_user: Optional[str] = None
-        
         # Build UI (must be first - needed for dialogs)
         self._create_ui()
         
@@ -616,171 +609,6 @@ class SCSignatureScannerApp:
         )
         self.scale_display.pack(side=tk.LEFT, padx=(10, 0))
         
-        # === Row 3: Refinery Method + Data Sources (side by side) ===
-        row3 = tk.Frame(settings_content, bg=colors['bg_main'])
-        row3.pack(fill=tk.X, pady=(0, 10))
-        
-        # Left: Refinery Method
-        method_frame = tk.Frame(row3, bg=colors['bg_main'])
-        method_frame.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=(0, 5))
-        
-        method_label = tk.Label(
-            method_frame,
-            text="REFINERY METHOD",
-            bg=colors['bg_main'],
-            fg=colors['accent_primary'],
-            font=fonts['subheading']
-        )
-        method_label.pack(anchor=tk.W, pady=(0, 5))
-        
-        method_border = tk.Frame(method_frame, bg=colors['border'])
-        method_border.pack(fill=tk.BOTH, expand=True)
-        
-        method_inner = tk.Frame(method_border, bg=colors['bg_light'], padx=12, pady=10)
-        method_inner.pack(fill=tk.BOTH, expand=True, padx=1, pady=1)
-        
-        method_desc = tk.Label(
-            method_inner,
-            text="Affects value estimates",
-            bg=colors['bg_light'],
-            fg=colors['text_muted'],
-            font=fonts['small']
-        )
-        method_desc.pack(anchor=tk.W, pady=(0, 6))
-        
-        # Refinery methods with yields (sorted by yield, high to low)
-        # Format: 'Name (Yield X% - Speed = Y - Price = Z)': yield_value
-        self.refinery_methods = {
-            'Dinyx Solventation (Yield 52.93% - Speed: Slowest - Price: Low$)': 0.5293,
-            'Ferron Exchange (Yield 52.93% - Speed: Slow - Price: Med$$)': 0.5293,
-            'Pyrometric Chromalysis (Yield 52.93% - Speed: Med - Price: High$$$)': 0.5293,
-            'Thermonatic Deposition (Yield 45% - Speed: Slow - Price: Low$)': 0.45,
-            'Electrostarolysis (Yield 45% - Speed: Med - Price: Med$$)': 0.45,
-            'Gaskin Process (Yield 45% - Speed: Fast - Price: High$$$)': 0.45,
-            'Kazen Winnowing (Yield 37.05% - Speed: Med - Price: Low$)': 0.3705,
-            'Cormack (Yield 37.05% - Speed: Fast - Price: Med$$)': 0.3705,
-            'XCR Reaction (Yield 37.05% - Speed: Fastest - Price: High$$$)': 0.3705,
-        }
-        
-        method_row = tk.Frame(method_inner, bg=colors['bg_light'])
-        method_row.pack(fill=tk.X)
-        
-        self.method_var = tk.StringVar(value='Dinyx Solventation (Yield 52.93% - Speed: Slowest - Price: Low$)')
-        method_combo = ttk.Combobox(
-            method_row,
-            textvariable=self.method_var,
-            values=list(self.refinery_methods.keys()),
-            state='readonly',
-            width=62,
-            font=fonts['body']
-        )
-        method_combo.pack(side=tk.LEFT)
-        method_combo.bind('<<ComboboxSelected>>', self._on_method_changed)
-        
-        # Right: Data Sources
-        data_frame = tk.Frame(row3, bg=colors['bg_main'])
-        data_frame.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=(5, 0))
-        
-        data_label = tk.Label(
-            data_frame,
-            text="DATA SOURCES",
-            bg=colors['bg_main'],
-            fg=colors['accent_primary'],
-            font=fonts['subheading']
-        )
-        data_label.pack(anchor=tk.W, pady=(0, 5))
-        
-        data_border = tk.Frame(data_frame, bg=colors['border'])
-        data_border.pack(fill=tk.BOTH, expand=True)
-        
-        data_inner = tk.Frame(data_border, bg=colors['bg_light'], padx=12, pady=10)
-        data_inner.pack(fill=tk.BOTH, expand=True, padx=1, pady=1)
-        
-        # Regolith status row
-        data_row1 = tk.Frame(data_inner, bg=colors['bg_light'])
-        data_row1.pack(fill=tk.X, pady=(0, 4))
-        
-        regolith_text = tk.Label(
-            data_row1,
-            text="🔑 Regolith:",
-            bg=colors['bg_light'],
-            fg=colors['text_secondary'],
-            font=fonts['small']
-        )
-        regolith_text.pack(side=tk.LEFT)
-        
-        self.api_status_label = tk.Label(
-            data_row1,
-            text="--",
-            bg=colors['bg_light'],
-            fg=colors['text_muted'],
-            font=fonts['small']
-        )
-        self.api_status_label.pack(side=tk.LEFT, padx=(5, 10))
-        
-        self.regolith_cache_label = tk.Label(
-            data_row1,
-            text="",
-            bg=colors['bg_light'],
-            fg=colors['text_muted'],
-            font=fonts['small']
-        )
-        self.regolith_cache_label.pack(side=tk.LEFT)
-        
-        # UEX status row
-        data_row2 = tk.Frame(data_inner, bg=colors['bg_light'])
-        data_row2.pack(fill=tk.X, pady=(0, 6))
-        
-        uex_text = tk.Label(
-            data_row2,
-            text="💰 UEX:",
-            bg=colors['bg_light'],
-            fg=colors['text_secondary'],
-            font=fonts['small']
-        )
-        uex_text.pack(side=tk.LEFT)
-        
-        self.pricing_status_label = tk.Label(
-            data_row2,
-            text="--",
-            bg=colors['bg_light'],
-            fg=colors['text_muted'],
-            font=fonts['small']
-        )
-        self.pricing_status_label.pack(side=tk.LEFT, padx=(5, 0))
-        
-        # Buttons row
-        data_row3 = tk.Frame(data_inner, bg=colors['bg_light'])
-        data_row3.pack(fill=tk.X)
-        
-        change_key_btn = tk.Button(
-            data_row3,
-            text="🔑 Key",
-            bg=colors['bg_hover'],
-            fg=colors['text_primary'],
-            font=fonts['small'],
-            relief='flat',
-            padx=6,
-            pady=2,
-            cursor='hand2',
-            command=self._change_api_key
-        )
-        change_key_btn.pack(side=tk.LEFT, padx=(0, 5))
-        
-        refresh_all_btn = tk.Button(
-            data_row3,
-            text="🔄 Refresh",
-            bg=colors['cyan'],
-            fg=colors['bg_dark'],
-            font=('Segoe UI', 8, 'bold'),
-            relief='flat',
-            padx=6,
-            pady=2,
-            cursor='hand2',
-            command=self._refresh_all_data
-        )
-        refresh_all_btn.pack(side=tk.LEFT)
-        
         # === Row 5: Debug Output Folder (full width) ===
         row5 = tk.Frame(settings_content, bg=colors['bg_main'])
         row5.pack(fill=tk.X, pady=(0, 10))
@@ -1099,19 +927,24 @@ class SCSignatureScannerApp:
         sig_inner.pack(fill=tk.X, padx=1, pady=1)
         
         sig_types = [
-            ("🚀", "Space", "Asteroids - Ship mining only"),
-            (None, None, "I, C, S, P, M, Q, E types"),
-            ("", "", ""),
-            ("⛏️", "Surface", "Surface deposits - Ship mining"),
-            (None, None, "Shale, Felsic, Obsidian, Atacamite"),
-            (None, None, "Quartzite, Gneiss, Granite, Igneous"),
+            ("🚀", "Ship Mining", "Asteroids & surface rocks — SC 4.7+"),
+            (None, None, "Signature = mineral identity (100% pure)"),
+            (None, None, "Legendary: 3170-3200  Epic: 3370-3400"),
+            (None, None, "Rare: 3540-3600  Uncommon: 3825-3900"),
+            (None, None, "Common: 4180-4300"),
             ("", "", ""),
             ("💎", "Ground", "Ground deposits - ROC or FPS"),
-            (None, None, "Small (120) = FPS/Hand mining"),
-            (None, None, "Large (620) = ROC/Vehicle"),
+            (None, None, "Small (3000) = FPS/Hand mining"),
+            (None, None, "Large (4000) = ROC/Vehicle"),
             (None, None, "100% single mineral per cluster"),
             ("", "", ""),
-            ("🔧", "Salvage", "2000 sig per hull panel"),
+            ("🔧", "Salvage", "Hull panels / Active FPS scrap"),
+            (None, None, "Panels (2000) = Hull scraping targets"),
+            (None, None, "Small Debris (1700) = Avenger-class wreck"),
+            (None, None, "Medium Debris (1850) = Ares Inferno wreck"),
+            (None, None, "Large Debris (2400) = C2 Hercules wreck"),
+            (None, None, "Capital Debris (3000) = 890 Jump wreck *"),
+            (None, None, "* 3000 collides with FPS ground deposit"),
         ]
         
         for icon, name, desc in sig_types:
@@ -1250,9 +1083,10 @@ class SCSignatureScannerApp:
         
         # Create overlay
         self.overlay = OverlayPopup(
+            root=self.root,
             position=self.overlay_position,
             duration=self.duration_var.get(),
-            scale=self.scale_var.get()
+            scale=self.scale_var.get(),
         )
         
         self.is_monitoring = True
@@ -1283,61 +1117,70 @@ class SCSignatureScannerApp:
         self._log("⏹ Stopped monitoring")
     
     def _on_new_screenshot(self, filepath: Path):
-        """Handle new screenshot detected."""
-        self._log(f"📸 New: {filepath.name}")
-        
-        # Scan for signature
-        if self.scanner:
-            result = self.scanner.scan_image(filepath)
-            
-            # Check for errors
-            if result and result.get('error'):
-                self._log(f"   ⚠ Error: {result['error']}")
-                self.screenshot_count += 1
-                self.stats_label.configure(text=f"{self.screenshot_count} screenshots processed")
-                return
-            
-            if result and result.get('signature'):
-                sig = result['signature']
-                matches = result.get('matches', [])
-                all_sigs = result.get('all_signatures', [])
-                
-                self._log(f"   Signature: {sig:,}")
-                if len(all_sigs) > 1:
-                    self._log(f"   All found: {all_sigs}")
-                self._log(f"   Matches: {len(matches)}")
-                
-                # Show debug info
-                if self.debug_var.get() and result.get('debug'):
-                    debug = result['debug']
-                    self._log(f"   [DEBUG] Regions: {debug.get('regions_checked', 0)}")
-                    for ocr in debug.get('raw_ocr_text', []):
-                        text_preview = ocr['text'][:50] + '...' if len(ocr['text']) > 50 else ocr['text']
-                        self._log(f"   [DEBUG] OCR ({ocr['region']}): {text_preview}")
-                
-                # Show overlay (must schedule on main thread - watchdog runs in background thread)
-                if matches:
-                    self.root.after(0, lambda s=sig, m=matches: self._show_overlay(s, m))
-            else:
-                self._log("   No signature detected")
-                
-                # Show debug info even on failure
-                if self.debug_var.get() and self.scanner.last_debug_info:
-                    debug = self.scanner.last_debug_info
-                    self._log(f"   [DEBUG] Regions checked: {debug.get('regions_checked', 0)}")
-                    self._log(f"   [DEBUG] Check debug_output/ for images")
-        
-        # Update stats
-        self.screenshot_count += 1
-        self.stats_label.configure(text=f"{self.screenshot_count} screenshots processed")
+        """Handle new screenshot detected.
+
+        Called from the watchdog background thread. The OCR scan runs here intentionally
+        (it is the slow work and must not block the main thread). All widget operations
+        are collected and dispatched to the main thread via root.after().
+        """
+        # Do the expensive OCR work on the background thread
+        result = self.scanner.scan_image(filepath) if self.scanner else None
+
+        # Read tkinter variable values while still on background thread — IntVar/BooleanVar
+        # .get() is safe to call off-thread; it only reads a Python int from memory.
+        debug_enabled = self.debug_var.get()
+
+        # Collect all log lines and any overlay args without touching any widgets
+        log_lines = [f"📸 New: {filepath.name}"]
+        overlay_args: tuple | None = None
+
+        if result and result.get("error"):
+            log_lines.append(f"   ⚠ Error: {result['error']}")
+        elif result and result.get("signature"):
+            sig = result["signature"]
+            matches = result.get("matches", [])
+            all_sigs = result.get("all_signatures", [])
+
+            log_lines.append(f"   Signature: {sig:,}")
+            if len(all_sigs) > 1:
+                log_lines.append(f"   All found: {all_sigs}")
+            log_lines.append(f"   Matches: {len(matches)}")
+
+            if debug_enabled and result.get("debug"):
+                debug = result["debug"]
+                log_lines.append(f"   [DEBUG] Regions: {debug.get('regions_checked', 0)}")
+                for ocr in debug.get("raw_ocr_text", []):
+                    text_preview = ocr["text"][:50] + "..." if len(ocr["text"]) > 50 else ocr["text"]
+                    log_lines.append(f"   [DEBUG] OCR ({ocr['region']}): {text_preview}")
+
+            if matches:
+                overlay_args = (sig, matches)
+        else:
+            log_lines.append("   No signature detected")
+            if debug_enabled and self.scanner and self.scanner.last_debug_info:
+                debug = self.scanner.last_debug_info
+                log_lines.append(f"   [DEBUG] Regions checked: {debug.get('regions_checked', 0)}")
+                log_lines.append(f"   [DEBUG] Check debug_output/ for images")
+
+        # Dispatch all UI work to the main thread in one shot
+        def _ui_update() -> None:
+            for line in log_lines:
+                self._log(line)
+            self.screenshot_count += 1
+            self.stats_label.configure(text=f"{self.screenshot_count} screenshots processed")
+            if overlay_args:
+                self._show_overlay(*overlay_args)
+
+        self.root.after(0, _ui_update)
     
     def _show_overlay(self, sig: int, matches: list):
         """Show the overlay popup (must be called from main thread)."""
         if not self.overlay:
             self.overlay = OverlayPopup(
+                root=self.root,
                 position=self.overlay_position,
                 duration=self.duration_var.get(),
-                scale=self.scale_var.get()
+                scale=self.scale_var.get(),
             )
         self.overlay.show(sig, matches)
     
@@ -1402,53 +1245,21 @@ class SCSignatureScannerApp:
             self._test_overlay.destroy()
         
         self._test_overlay = OverlayPopup(
+            root=self.root,
             position=self.overlay_position,
             duration=self.duration_var.get(),
-            scale=self.scale_var.get()
+            scale=self.scale_var.get(),
         )
         
-        # Test data for E-type asteroid with live UEX prices
-        test_signature = 1900
-
-        # Get current prices from pricing manager
-        price_mgr = pricing.get_pricing_manager()
-
-        # Build composition with live prices
-        test_ores = [
-            ('Quantanium', 0.05, 0.30),
-            ('Taranite', 0.10, 0.31),
-            ('Bexalite', 0.12, 0.30),
-            ('Gold', 0.29, 0.31),
-            ('Beryl', 0.39, 0.42),
-            ('Tungsten', 0.18, 0.46),
-            ('Titanium', 0.12, 0.49),
-            ('Quartz', 0.13, 0.48),
-        ]
-
-        composition = []
-        total_value = 0
-        for name, prob, med_pct in test_ores:
-            ore_price = price_mgr.get_ore_price(name)
-            # Estimate value based on typical rock mass (~5000kg)
-            est_value = int(ore_price * prob * med_pct * 0.5)  # Simplified estimate
-            total_value += est_value
-            composition.append({
-                'name': name,
-                'prob': prob,
-                'medPct': med_pct,
-                'value': est_value,
-                'price': ore_price
-            })
+        test_signature = 4900
 
         test_matches = [{
             'type': 'known',
             'name': 'E-type Asteroid',
             'category': 'asteroid',
             'rock_type': 'ETYPE',
-            'signature': 1900,
+            'signature': 4900,
             'confidence': 1.0,
-            'est_value': total_value,
-            'composition': composition
         }]
         
         self._test_overlay.show(test_signature, test_matches)
@@ -1488,15 +1299,15 @@ class SCSignatureScannerApp:
             debug_dir = self.scanner.debug_dir
             debug_dir.mkdir(exist_ok=True)
             
-            import os
             import platform
-            
+            import subprocess
+
             if platform.system() == 'Windows':
                 os.startfile(debug_dir)
             elif platform.system() == 'Darwin':
-                os.system(f'open "{debug_dir}"')
+                subprocess.run(['open', str(debug_dir)])
             else:
-                os.system(f'xdg-open "{debug_dir}"')
+                subprocess.run(['xdg-open', str(debug_dir)])
             
             self._log(f"📂 Opened: {debug_dir}")
     
@@ -1518,39 +1329,6 @@ class SCSignatureScannerApp:
             self.scanner.debug_dir = default_dir
         self._log(f"📁 Debug folder reset to default")
         self._save_config(show_message=False)
-    
-    def _init_pricing(self):
-        """Initialize pricing system on startup."""
-        self._log("Loading pricing data...")
-        
-        success, error = pricing.initialize_pricing()
-        
-        if success:
-            manager = pricing.get_pricing_manager()
-            status = manager.get_status()
-            self._log(f"✓ Pricing loaded: {status['ore_count']} ores")
-            self._log(f"  Systems: {', '.join(status['systems'])}")
-            self._update_pricing_status()
-            
-            # Set yield from selected refinery method
-            yield_value = self._get_current_yield()
-            pricing.set_refinery_yield(yield_value)
-        else:
-            self._log(f"⚠ Pricing failed: {error}")
-            self._update_pricing_status()
-    
-    def _on_method_changed(self, event=None):
-        """Handle refinery method selection change."""
-        method = self.method_var.get()
-        yield_value = self.refinery_methods.get(method, 0.5293)
-        pricing.set_refinery_yield(yield_value)
-        self._log(f"⚙ Refinery method: {method.split(' (')[0]} ({yield_value:.2%})")
-        self._save_config(show_message=False)
-    
-    def _get_current_yield(self) -> float:
-        """Get the yield value for the currently selected refinery method."""
-        method = self.method_var.get()
-        return self.refinery_methods.get(method, 0.5293)
     
     def _check_for_updates(self):
         """Check for updates in background thread."""
@@ -1653,14 +1431,10 @@ class SCSignatureScannerApp:
 
         def exit_and_download():
             import webbrowser
-            import os
             webbrowser.open(download_url)
             dialog.destroy()
-            try:
-                self.root.destroy()
-            except:
-                pass
-            os._exit(0)  # Force exit without cleanup to avoid tkinter errors
+            self.root.quit()
+            sys.exit(0)
 
         def continue_old():
             dialog.destroy()
@@ -1705,145 +1479,6 @@ class SCSignatureScannerApp:
             )
             # Pack after warning banner
             self.update_banner.pack(fill=tk.X, padx=15, pady=(0, 10), after=self.warning_banner)
-    
-    def _refresh_pricing(self):
-        """Refresh pricing data from UEX API."""
-        self._log("Refreshing pricing data...")
-        
-        success, error = pricing.refresh_pricing()
-        
-        if success:
-            manager = pricing.get_pricing_manager()
-            status = manager.get_status()
-            self._log(f"✓ Pricing refreshed: {status['ore_count']} ores")
-            self._update_pricing_status()
-            messagebox.showinfo("Pricing", f"Successfully loaded {status['ore_count']} ore prices")
-        else:
-            self._log(f"⚠ Refresh failed: {error}")
-            self._update_pricing_status()
-            messagebox.showerror("Pricing Error", f"Failed to refresh pricing data:\n{error}")
-    
-    def _change_api_key(self):
-        """Allow user to change their API key."""
-        cfg = self.config.load() or {}
-        current_key = cfg.get('regolith_api_key', '')
-        
-        new_key = self._show_api_key_dialog(current_key)
-        
-        if new_key and new_key != current_key:
-            # Validate the new key
-            api = regolith_api.get_api(new_key)
-            valid, message = api.validate_key()
-            
-            if valid:
-                cfg['regolith_api_key'] = new_key
-                self.config.save(cfg)
-                self.regolith_user = message
-                self._log(f"✓ API key updated: {message}")
-                self._update_api_status()
-                messagebox.showinfo("API Key", f"API key validated successfully!\n\nLogged in as: {message}")
-            else:
-                self._log(f"⚠ API key invalid: {message}")
-                messagebox.showerror("Invalid Key", f"API key validation failed:\n{message}")
-    
-    def _refresh_all_data(self):
-        """Refresh both UEX pricing and Regolith survey data."""
-        self._log("Refreshing all data...")
-        
-        errors = []
-        
-        # Refresh Regolith data
-        cfg = self.config.load() or {}
-        api_key = cfg.get('regolith_api_key', '')
-        
-        if api_key:
-            api = regolith_api.get_api(api_key)
-            success, message = api.refresh_cache()
-            if success:
-                self._log(f"✓ Regolith data refreshed")
-            else:
-                self._log(f"⚠ Regolith refresh failed: {message}")
-                errors.append(f"Regolith: {message}")
-        else:
-            errors.append("Regolith: No API key configured")
-        
-        # Refresh UEX pricing
-        success, error = pricing.refresh_pricing()
-        if success:
-            manager = pricing.get_pricing_manager()
-            status = manager.get_status()
-            self._log(f"✓ UEX pricing refreshed: {status['ore_count']} ores")
-        else:
-            self._log(f"⚠ UEX refresh failed: {error}")
-            errors.append(f"UEX: {error}")
-        
-        # Update UI
-        self._update_pricing_status()
-        self._update_api_status()
-        
-        if errors:
-            messagebox.showwarning(
-                "Partial Refresh",
-                f"Some data sources failed to refresh:\n\n" + "\n".join(errors)
-            )
-        else:
-            messagebox.showinfo("Data Refreshed", "All data sources refreshed successfully!")
-    
-    def _update_api_status(self):
-        """Update the API status labels."""
-        colors = RegolithTheme.COLORS
-        
-        # Check if we have a valid user
-        if hasattr(self, 'regolith_user') and self.regolith_user:
-            self.api_status_label.configure(
-                text=self.regolith_user,
-                fg=colors['success']
-            )
-        else:
-            self.api_status_label.configure(
-                text="Not validated",
-                fg=colors['text_muted']
-            )
-        
-        # Update cache age
-        cfg = self.config.load() or {}
-        api_key = cfg.get('regolith_api_key', '')
-        
-        if api_key:
-            api = regolith_api.get_api(api_key)
-            cache_age = api.get_cache_age_str()
-            self.regolith_cache_label.configure(
-                text=f"Cache: {cache_age}",
-                fg=colors['text_secondary'] if api.is_cache_valid() else colors['warning']
-            )
-        else:
-            self.regolith_cache_label.configure(
-                text="Cache: --",
-                fg=colors['text_muted']
-            )
-    
-    def _update_pricing_status(self):
-        """Update the pricing status label."""
-        try:
-            manager = pricing.get_pricing_manager()
-            status = manager.get_status()
-            
-            if status['prices_loaded']:
-                age_min = int(status['cache_age_seconds'] / 60) if status['cache_age_seconds'] else 0
-                self.pricing_status_label.configure(
-                    text=f"{status['ore_count']} ores ({age_min}m ago)",
-                    fg=RegolithTheme.COLORS['success']
-                )
-            else:
-                self.pricing_status_label.configure(
-                    text="Not loaded",
-                    fg=RegolithTheme.COLORS['error']
-                )
-        except Exception:
-            self.pricing_status_label.configure(
-                text="Error",
-                fg=RegolithTheme.COLORS['error']
-            )
     
     def _define_scan_region(self):
         """Open region selector to define scan area."""
@@ -1906,11 +1541,6 @@ class SCSignatureScannerApp:
             self.scale_var.set(cfg.get('popup_scale', 1.0))
             self.debug_var.set(cfg.get('debug_mode', False))
             
-            # Load refinery method
-            saved_method = cfg.get('refinery_method', 'Dinyx Solventation (Yield 52.93% - Speed: Slowest - Price: Low$)')
-            if saved_method in self.refinery_methods:
-                self.method_var.set(saved_method)
-            
             # Load debug folder
             debug_folder = cfg.get('debug_folder', '')
             if debug_folder and Path(debug_folder).exists():
@@ -1942,7 +1572,6 @@ class SCSignatureScannerApp:
             'screenshot_folder': self.folder_var.get(),
             'popup_duration': self.duration_var.get(),
             'popup_scale': self.scale_var.get(),
-            'refinery_method': self.method_var.get(),
             'debug_mode': self.debug_var.get(),
             'debug_folder': self.debug_folder_var.get(),
         })
@@ -1955,9 +1584,6 @@ class SCSignatureScannerApp:
             cfg.pop('popup_position_x', None)
             cfg.pop('popup_position_y', None)
         
-        # Update pricing yield from current method
-        pricing.set_refinery_yield(self._get_current_yield())
-        
         self.config.save(cfg)
         self._log("💾 Settings saved")
         if show_message:
@@ -1966,304 +1592,14 @@ class SCSignatureScannerApp:
     def run(self):
         """Run the application."""
         self.root.protocol("WM_DELETE_WINDOW", self._on_close)
-        
-        # Step 1: Validate API key first (required for Regolith data)
-        if not self._validate_api_key_startup():
-            self.root.destroy()
-            return
-        
-        # Step 2: Initialize scanner with signature database
+
+        # Step 1: Initialize scanner with signature database
         self._init_scanner()
-        
-        # Step 3: Load user config (after scanner exists so debug mode can be applied)
+
+        # Step 2: Load user config (after scanner exists so debug mode can be applied)
         self._load_config()
-        
-        # Step 4: Initialize pricing system (UEX)
-        self._init_pricing()
-        
+
         self.root.mainloop()
-    
-    def _validate_api_key_startup(self) -> bool:
-        """Validate API key on startup. Returns True if valid, False to exit."""
-        cfg = self.config.load() or {}
-        api_key = cfg.get('regolith_api_key', '')
-        error_message = None
-        
-        while True:
-            if api_key:
-                # Try to validate existing key (with retry)
-                valid, message = self._validate_key_with_retry(api_key)
-                
-                if valid:
-                    self._log(f"✓ API key valid: {message}")
-                    self.regolith_user = message
-                    
-                    # Check/update cache
-                    api = regolith_api.get_api(api_key)
-                    self._check_regolith_cache(api)
-                    
-                    # Update UI status
-                    self._update_api_status()
-                    return True
-                else:
-                    self._log(f"⚠ API key invalid: {message}")
-                    error_message = message
-            
-            # Show API key dialog
-            result = self._show_api_key_dialog(api_key, error_message)
-            
-            if result is None:
-                # User cancelled
-                return False
-            
-            api_key = result
-            
-            # Save the new key
-            cfg['regolith_api_key'] = api_key
-            self.config.save(cfg)
-    
-    def _validate_key_with_retry(self, api_key: str) -> tuple:
-        """Validate API key with one retry after 3 seconds on failure.
-        
-        Returns:
-            Tuple of (is_valid, message)
-        """
-        self._log("Validating Regolith.rocks API key...")
-        api = regolith_api.get_api(api_key)
-        
-        # First attempt
-        valid, message = api.validate_key()
-        
-        if valid:
-            return True, message
-        
-        # Check if it's a server/connection error (worth retrying)
-        retry_errors = ["server error", "timed out", "connect", "connection"]
-        should_retry = any(err in message.lower() for err in retry_errors)
-        
-        if not should_retry:
-            # Don't retry for auth errors like "Invalid API key"
-            return False, message
-        
-        # Wait and retry
-        self._log(f"Connection issue: {message}")
-        self._log("Retrying in 3 seconds...")
-        time.sleep(3)
-        
-        # Second attempt
-        valid, message = api.validate_key()
-        
-        if valid:
-            self._log("Retry successful")
-            return True, message
-        else:
-            return False, f"{message} (after retry)"
-    
-    def _check_regolith_cache(self, api: regolith_api.RegolithAPI):
-        """Check Regolith cache and refresh if needed."""
-        if api.is_cache_valid():
-            age = api.get_cache_age_str()
-            self._log(f"✓ Regolith cache valid ({age})")
-        else:
-            self._log("Regolith cache expired, refreshing...")
-            success, message = api.refresh_cache()
-            if success:
-                self._log(f"✓ {message}")
-            else:
-                self._log(f"⚠ Cache refresh failed: {message}")
-    
-    def _show_api_key_dialog(self, current_key: str = "", error_msg: str = None) -> str:
-        """Show dialog to enter API key. Returns key or None if cancelled."""
-        colors = RegolithTheme.COLORS
-        fonts = RegolithTheme.FONTS
-        
-        dialog = tk.Toplevel(self.root)
-        dialog.title("Regolith.rocks API Key Required")
-        dialog.configure(bg=colors['bg_main'])
-        dialog.transient(self.root)
-        dialog.grab_set()
-        
-        # Center on screen
-        dialog_width = 500
-        dialog_height = 420
-        x = (dialog.winfo_screenwidth() - dialog_width) // 2
-        y = (dialog.winfo_screenheight() - dialog_height) // 2
-        dialog.geometry(f"{dialog_width}x{dialog_height}+{x}+{y}")
-        dialog.resizable(False, False)
-        
-        result = {'key': None}
-        
-        # Content
-        content = tk.Frame(dialog, bg=colors['bg_main'], padx=25, pady=20)
-        content.pack(fill=tk.BOTH, expand=True)
-        
-        # Icon and title
-        header = tk.Frame(content, bg=colors['bg_main'])
-        header.pack(fill=tk.X, pady=(0, 15))
-        
-        icon = tk.Label(
-            header,
-            text="🔑",
-            bg=colors['bg_main'],
-            font=('Segoe UI', 28)
-        )
-        icon.pack(side=tk.LEFT, padx=(0, 15))
-        
-        title_frame = tk.Frame(header, bg=colors['bg_main'])
-        title_frame.pack(side=tk.LEFT, fill=tk.X)
-        
-        title = tk.Label(
-            title_frame,
-            text="API Key Required",
-            bg=colors['bg_main'],
-            fg=colors['accent_primary'],
-            font=('Segoe UI', 14, 'bold')
-        )
-        title.pack(anchor=tk.W)
-        
-        subtitle = tk.Label(
-            title_frame,
-            text="Connect to Regolith.rocks for mining data",
-            bg=colors['bg_main'],
-            fg=colors['text_muted'],
-            font=fonts['small']
-        )
-        subtitle.pack(anchor=tk.W)
-        
-        # Error message (if any)
-        if error_msg:
-            error_frame = tk.Frame(content, bg=colors['error'], padx=10, pady=8)
-            error_frame.pack(fill=tk.X, pady=(0, 10))
-            
-            error_label = tk.Label(
-                error_frame,
-                text=f"⚠ {error_msg}",
-                bg=colors['error'],
-                fg='#ffffff',
-                font=fonts['body']
-            )
-            error_label.pack(anchor=tk.W)
-        
-        # Instructions
-        instructions = tk.Label(
-            content,
-            text="Enter your Regolith.rocks API key below.\nYou can get your key from your profile settings.",
-            bg=colors['bg_main'],
-            fg=colors['text_secondary'],
-            font=fonts['body'],
-            justify=tk.LEFT
-        )
-        instructions.pack(anchor=tk.W, pady=(0, 10))
-        
-        # API Key entry
-        key_frame = tk.Frame(content, bg=colors['border'])
-        key_frame.pack(fill=tk.X, pady=(0, 10))
-        
-        key_inner = tk.Frame(key_frame, bg=colors['bg_dark'], padx=2, pady=2)
-        key_inner.pack(fill=tk.X, padx=1, pady=1)
-        
-        key_var = tk.StringVar(value=current_key)
-        key_entry = tk.Entry(
-            key_inner,
-            textvariable=key_var,
-            bg=colors['bg_dark'],
-            fg=colors['text_primary'],
-            font=fonts['mono'],
-            relief='flat',
-            insertbackground=colors['accent_primary'],
-            show='•'
-        )
-        key_entry.pack(fill=tk.X, padx=8, pady=8)
-        key_entry.focus_set()
-        
-        # Show/hide toggle
-        show_var = tk.BooleanVar(value=False)
-        
-        def toggle_show():
-            key_entry.configure(show='' if show_var.get() else '•')
-        
-        show_check = tk.Checkbutton(
-            content,
-            text="Show key",
-            variable=show_var,
-            bg=colors['bg_main'],
-            fg=colors['text_muted'],
-            font=fonts['small'],
-            selectcolor=colors['bg_dark'],
-            activebackground=colors['bg_main'],
-            activeforeground=colors['text_muted'],
-            command=toggle_show
-        )
-        show_check.pack(anchor=tk.W, pady=(0, 10))
-        
-        # Get API key link
-        def open_api_page():
-            import webbrowser
-            webbrowser.open("https://regolith.rocks/profile/api")
-        
-        link = tk.Label(
-            content,
-            text="→ Get your API key at regolith.rocks/profile/api",
-            bg=colors['bg_main'],
-            fg=colors['cyan'],
-            font=fonts['body'],
-            cursor='hand2'
-        )
-        link.pack(anchor=tk.W, pady=(0, 15))
-        link.bind('<Button-1>', lambda e: open_api_page())
-        
-        # Buttons
-        btn_frame = tk.Frame(content, bg=colors['bg_main'])
-        btn_frame.pack(fill=tk.X)
-        
-        def on_submit():
-            key = key_var.get().strip()
-            if key:
-                result['key'] = key
-                dialog.destroy()
-            else:
-                messagebox.showwarning("No Key", "Please enter an API key.", parent=dialog)
-        
-        def on_cancel():
-            result['key'] = None
-            dialog.destroy()
-        
-        submit_btn = tk.Button(
-            btn_frame,
-            text="✓  Validate & Continue",
-            bg=colors['accent_primary'],
-            fg=colors['bg_dark'],
-            font=('Segoe UI', 10, 'bold'),
-            relief='flat',
-            padx=20,
-            pady=8,
-            cursor='hand2',
-            command=on_submit
-        )
-        submit_btn.pack(side=tk.LEFT, padx=(0, 10))
-        
-        cancel_btn = tk.Button(
-            btn_frame,
-            text="Exit",
-            bg=colors['bg_light'],
-            fg=colors['text_primary'],
-            font=fonts['body'],
-            relief='flat',
-            padx=20,
-            pady=8,
-            cursor='hand2',
-            command=on_cancel
-        )
-        cancel_btn.pack(side=tk.LEFT)
-        
-        # Bind Enter key
-        dialog.bind('<Return>', lambda e: on_submit())
-        dialog.bind('<Escape>', lambda e: on_cancel())
-        
-        # Wait for dialog
-        dialog.wait_window()
-        
-        return result['key']
     
     def _on_close(self):
         """Handle window close."""

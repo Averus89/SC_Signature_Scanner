@@ -11,6 +11,7 @@ API Documentation: See RegolithAPI/API_DOCUMENTATION.md
 """
 
 import json
+import threading
 import requests
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -23,7 +24,7 @@ import paths
 API_URL = "https://api.regolith.rocks"
 CACHE_FILE = "regolith_cache.json"
 CACHE_MAX_AGE_DAYS = 7
-CURRENT_EPOCH = "4.4"  # Current Star Citizen version
+CURRENT_EPOCH = "4.6"  # Current Star Citizen version
 
 
 class RegolithAPIError(Exception):
@@ -206,14 +207,15 @@ class RegolithAPI:
         # Fetch lookups (prices, densities, refinery methods)
         result["lookups"] = self.fetch_lookups()
         
-        # Fetch rock compositions by type (for signature → value calculation)
-        for system in ["STANTON", "PYRO", "NYX"]:
-            try:
-                rock_data = self.fetch_survey_data("shipOreByRockClassProb")
+        # Fetch rock compositions by type (for signature → value calculation).
+        # One API call returns all systems — iterate over what the response contains.
+        try:
+            rock_data = self.fetch_survey_data("shipOreByRockClassProb")
+            for system in ["STANTON", "PYRO", "NYX"]:
                 if system in rock_data:
                     result["rock_compositions"][system] = rock_data[system]
-            except RegolithAPIError:
-                pass  # System might not have data
+        except RegolithAPIError as e:
+            result["_rock_composition_error"] = str(e)
         
         # Fetch location bonuses
         try:
@@ -344,24 +346,26 @@ class RegolithAPI:
 # === Module-level convenience functions ===
 
 _instance: Optional[RegolithAPI] = None
+_instance_lock = threading.Lock()
 
 
 def get_api(api_key: str = None) -> RegolithAPI:
     """Get or create the global API instance.
-    
+
     Args:
         api_key: Optional API key to set
-        
+
     Returns:
         RegolithAPI instance
     """
     global _instance
-    
-    if _instance is None:
-        _instance = RegolithAPI(api_key)
-    elif api_key:
-        _instance.set_api_key(api_key)
-    
+
+    with _instance_lock:
+        if _instance is None:
+            _instance = RegolithAPI(api_key)
+        elif api_key:
+            _instance.set_api_key(api_key)
+
     return _instance
 
 

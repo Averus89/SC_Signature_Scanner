@@ -11,8 +11,10 @@ from typing import Optional, Tuple, Callable
 from PIL import Image, ImageTk
 import json
 
+import paths
 
-CONFIG_FILE = Path(__file__).parent / "scan_region.json"
+
+CONFIG_FILE = paths.get_user_data_path() / "scan_region.json"
 
 
 def load_region() -> Optional[Tuple[int, int, int, int]]:

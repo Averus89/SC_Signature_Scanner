@@ -223,7 +223,7 @@ class SplashScreen:
             try:
                 self.root.update()
                 time.sleep(0.03)  # ~30fps
-            except:
+            except tk.TclError:
                 break
 
     def close(self):
@@ -231,7 +231,7 @@ class SplashScreen:
         for after_id in self._after_ids:
             try:
                 self.root.after_cancel(after_id)
-            except:
+            except tk.TclError:
                 pass
         self.root.destroy()
 

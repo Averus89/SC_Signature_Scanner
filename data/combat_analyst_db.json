@@ -1,23 +1,25 @@
 {
   "metadata": {
-    "version": "4.6",
-    "sc_version": "4.6",
-    "source": "Star Citizen Data.p4k extraction + in-game survey 2025",
-    "description": "Minable rock signatures",
-    "includes_salvage": true,
-    "verified": "2025 mining survey",
+    "version": "4.7",
+    "sc_version": "4.7",
+    "source": "Game2.xml extraction (unp4k-suite v3.13.66) — 2026-03-18",
+    "description": "Minable rock signatures — SC 4.7 per-mineral signature system",
+    "verified": "2026-03-18 Game2.xml DCB extraction",
+    "notes": [
+      "SC 4.7 introduces per-mineral signatures. Each mineral has a unique signature value regardless of whether it is in an asteroid or a surface rock.",
+      "The old I/C/S/P/M/Q/E asteroid type system is REMOVED in SC 4.7.",
+      "Signature 4000 collision: Large ground deposits (ROC/GV) and any remaining generic surface entity bases share 4000. All ship-mined minerals now have unique signatures above 3000.",
+      "Vlk Pearls and Flowstone have signature 0 and are undetectable by scanner.",
+      "FPS small ground deposits = 3000. ROC/GV large ground deposits = 4000.",
+      "SC 4.7 salvage update: new debris signatures — 1700 (small/Avenger-class), 1850 (medium/Ares Inferno), 2400 (large/C2 Hercules), 3000 (capital/890 Jump). Signature 3000 now collides: FPS ground deposit small AND capital wreck debris."
+    ],
     "mining_categories": {
-      "space_deposits": {
-        "aka": "Asteroids",
-        "location": "Space (asteroid belts, Aaron Halo)",
+      "ship_mining": {
+        "aka": "Asteroids / Surface deposits",
+        "location": "Space (asteroids) or planetary surfaces (surface rocks)",
         "mining_method": "Ship mining only (Prospector, MOLE)",
-        "composition": "Mixed minerals"
-      },
-      "surface_deposits": {
-        "aka": "Surface rocks",
-        "location": "Planetary surfaces",
-        "mining_method": "Ship mining only (Prospector, MOLE)",
-        "composition": "Mixed minerals"
+        "composition": "Signature identifies the dominant mineral (40–80%). Secondary minerals also present (5–20%). PTU source: mining_data-4.7.0-ptu.11450623.json",
+        "note": "SC 4.7 system: signature uniquely identifies the dominant mineral and its value tier. Rock is not pure — secondary minerals exist."
       },
       "ground_deposits": {
         "aka": "Gem deposits",
@@ -26,14 +28,14 @@
         "composition": "100% single mineral per cluster",
         "variants": {
           "small": {
-            "base_signature": 120,
-            "primary_method": "FPS/Hand mining",
-            "note": "Can be mined by vehicles with experienced miners"
+            "base_signature": 3000,
+            "primary_method": "FPS/Hand mining (can be mined by vehicles with skill)",
+            "note": "Confirmed 3000 in SC 4.7 DCB"
           },
           "large": {
-            "base_signature": 620,
-            "primary_method": "ROC/Vehicle mining",
-            "note": "Can be mined by multiple FPS miners collaborating"
+            "base_signature": 4000,
+            "primary_method": "ROC/Vehicle mining (can be mined by multiple FPS miners)",
+            "note": "Confirmed 4000 in SC 4.7 DCB"
           }
         },
         "cluster_rules": [
@@ -52,59 +54,149 @@
     }
   },
   "minables": {
-    "space_deposits": {
-      "_description": "Asteroids - Ship mining only (Prospector, MOLE). Mixed mineral composition.",
-      "I": 4000,
-      "C": 4700,
-      "S": 4720,
-      "P": 4750,
-      "M": 4850,
-      "Q": 4870,
-      "E": 4900
-    },
-    "surface_deposits": {
-      "_description": "Surface rocks - Ship mining only (Prospector, MOLE). Mixed mineral composition.",
-      "Shale": 4000,
-      "Felsic": 4000,
-      "Obsidian": 4000,
-      "Atacamite": 4000,
-      "Quartzite": 4000,
-      "Gneiss": 4000,
-      "Granite": 4000,
-      "Igneous": 4000
+    "ship_mining": {
+      "_description": "SC 4.7+ per-mineral signature system. Signature identifies the dominant mineral (40-80% composition). Rocks also contain secondary minerals (5-20%). Applies to both asteroids and surface deposits (ship-mined). Tiers indicate value: Legendary > Epic > Rare > Uncommon > Common.",
+      "legendary": {
+        "_range": "3170-3200",
+        "_note": "Highest value minerals",
+        "Quantainium": 3170,
+        "Stileron": 3185,
+        "Savrilium": 3200
+      },
+      "epic": {
+        "_range": "3370-3400",
+        "Ouratite": 3370,
+        "Riccite": 3385,
+        "Lindinium": 3400
+      },
+      "rare": {
+        "_range": "3540-3600",
+        "Beryl": 3540,
+        "Taranite": 3555,
+        "Borase": 3570,
+        "Gold": 3585,
+        "Bexalite": 3600
+      },
+      "uncommon": {
+        "_range": "3825-3900",
+        "Laranite": 3825,
+        "Aslarite": 3840,
+        "Titanium": 3855,
+        "Tungsten": 3870,
+        "Agricium": 3885,
+        "Torite": 3900
+      },
+      "common": {
+        "_range": "4180-4300",
+        "Hephaestanite": 4180,
+        "Tin": 4195,
+        "Quartz": 4210,
+        "Corundum": 4225,
+        "Copper": 4240,
+        "Silicon": 4255,
+        "Iron": 4270,
+        "Aluminum": 4285,
+        "Ice": 4300
+      }
     },
     "ground_deposits": {
-      "_description": "Ground deposits (surfaces and caves) - ROC or FPS mining. 100% single mineral per cluster.",
+      "_description": "Ground deposits — ROC or FPS mining. 100% single mineral per cluster. Signature does NOT identify the mineral (all use same base sig per size).",
       "small": {
         "_base_signature": 3000,
         "_method": "FPS/Hand mining (can be mined by vehicles with skill)"
       },
       "large": {
-        "_base_signature": 3000,
+        "_base_signature": 4000,
         "_method": "ROC/Vehicle mining (can be mined by multiple FPS miners)"
       },
-      "minerals": ["Hadanite", "Dolivine", "Aphorite", "Beradom", "Glacosite", "Feynmaline", "Jaclium"]
+      "minerals": [
+        "Hadanite",
+        "Dolivine",
+        "Aphorite",
+        "Beradom",
+        "Glacosite",
+        "Feynmaline",
+        "Jaclium",
+        "Sadaryx",
+        "Janalite",
+        "Saldynium",
+        "Carinite"
+      ],
+      "undetectable": {
+        "_note": "Signature 0 — undetectable by scanner",
+        "VlkPearls": 0,
+        "VlkIrradiatedPearls": 0,
+        "Flowstone": 0
+      }
     },
     "subsurface_deposits": {
-      "_description": "Sub-surface deposits - Not yet implemented. Requires sub-surface extractors.",
+      "_description": "Sub-surface deposits — Not yet implemented.",
       "_status": "NOT IN GAME",
       "_expected": "Late 2026-2027 (Consolidated Outland Pioneer)"
     }
   },
   "signature_lookup": {
-    "3000": "Ground Deposit (FPS/ROC mining) - 100% single mineral",
-    "4000": "I-type Asteroid / Surface Deposit",
-    "4700": "C-type Asteroid",
-    "4720": "S-type Asteroid",
-    "4750": "P-type Asteroid",
-    "4850": "M-type Asteroid",
-    "4870": "Q-type Asteroid",
-    "4900": "E-type Asteroid",
-    "2000": "Salvage Panel"
+    "1700": "Small Wreck Debris (Avenger-class / Scrap Cargo)",
+    "1850": "Medium Wreck Debris (Ares Inferno-class)",
+    "2000": "Salvage Panels / Active Scrap",
+    "2400": "Large Wreck Debris (C2 Hercules-class)",
+    "3000": "FPS Ground Deposit (Small) | Capital Wreck Debris (890 Jump) [COLLISION]",
+    "3170": "Quantainium (Legendary)",
+    "3185": "Stileron (Legendary)",
+    "3200": "Savrilium (Legendary)",
+    "3370": "Ouratite (Epic)",
+    "3385": "Riccite (Epic)",
+    "3400": "Lindinium (Epic)",
+    "3540": "Beryl (Rare)",
+    "3555": "Taranite (Rare)",
+    "3570": "Borase (Rare)",
+    "3585": "Gold (Rare)",
+    "3600": "Bexalite (Rare)",
+    "3825": "Laranite (Uncommon)",
+    "3840": "Aslarite (Uncommon)",
+    "3855": "Titanium (Uncommon)",
+    "3870": "Tungsten (Uncommon)",
+    "3885": "Agricium (Uncommon)",
+    "3900": "Torite (Uncommon)",
+    "4000": "Ground Deposit — Large (ROC/Vehicle mining)",
+    "4180": "Hephaestanite (Common)",
+    "4195": "Tin (Common)",
+    "4210": "Quartz (Common)",
+    "4225": "Corundum (Common)",
+    "4240": "Copper (Common)",
+    "4255": "Silicon (Common)",
+    "4270": "Iron (Common)",
+    "4285": "Aluminum (Common)",
+    "4300": "Ice (Common)"
   },
   "salvage": {
-    "description": "Salvageable hull panels on wrecks. Each panel = 2000 signature.",
-    "signature_per_panel": 2000,
-    "formula": "panel_count = signature / 2000"
+    "_description": "Salvage signatures for SC 4.7. Panels = active hull scraping work. Debris = detached wreck hull pieces, sized by ship class. Debris types added in SC 4.7 salvage gameplay update.",
+    "panels": {
+      "_base_signature": 2000,
+      "_name": "Salvage Panels",
+      "_description": "Active FPS hull scraping panels + SalvageScrap pieces + SalvageableRepairable ship parts. Signature = 2000 x panel count."
+    },
+    "debris": {
+      "small": {
+        "_base_signature": 1700,
+        "_name": "Small Wreck Debris",
+        "_description": "Avenger-class hull debris. Also: scrap commodity cargo containers (TBO Carryables)."
+      },
+      "medium": {
+        "_base_signature": 1850,
+        "_name": "Medium Wreck Debris",
+        "_description": "Ares Inferno-class hull debris."
+      },
+      "large": {
+        "_base_signature": 2400,
+        "_name": "Large Wreck Debris",
+        "_description": "C2 Hercules-class hull debris."
+      },
+      "capital": {
+        "_base_signature": 3000,
+        "_name": "Capital Wreck Debris",
+        "_description": "890 Jump-class hull debris. COLLISION: 3000 also matches FPS small ground deposits. Context-dependent."
+      }
+    }
   }
 }

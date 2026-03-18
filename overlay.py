@@ -23,24 +23,29 @@ class OverlayPopup:
     SALVAGE_COLOR = "#a371f7" # Purple for salvage
     MUTED_COLOR = "#8b949e"   # Muted text
     
-    def __init__(self, position: Tuple[int, int] = None, duration: int = 10, scale: float = 1.0):
+    def __init__(
+        self,
+        root: tk.Tk,
+        position: Tuple[int, int] = None,
+        duration: int = 10,
+        scale: float = 1.0,
+    ):
         """
         Initialize overlay.
-        
+
         Args:
+            root: The application's Tk root window. Overlay windows are
+                Toplevel children of this root so there is only one Tk instance.
             position: (x, y) tuple for top-left corner, or None for center
             duration: seconds to display
             scale: font/size scale factor (0.5 to 2.0)
         """
+        self._root = root
         self.position = position  # (x, y) tuple
         self.duration = duration
         self.scale = max(0.5, min(2.0, scale))  # Clamp to valid range
         self.window: Optional[tk.Toplevel] = None
         self._after_id = None
-        
-        # Create hidden root if needed
-        self._root = tk.Tk()
-        self._root.withdraw()
     
     def set_position(self, x: int, y: int):
         """Set the overlay position."""
@@ -52,7 +57,7 @@ class OverlayPopup:
         if self._after_id and self.window:
             try:
                 self.window.after_cancel(self._after_id)
-            except:
+            except tk.TclError:
                 pass
         
         # Destroy existing window
@@ -136,14 +141,6 @@ class OverlayPopup:
         )
         hint.pack(anchor=tk.E, pady=(int(10 * self.scale), 0))
     
-    def _format_value(self, value: int) -> str:
-        """Format aUEC value with K/M suffix."""
-        if value >= 1_000_000:
-            return f"{value / 1_000_000:.1f}M"
-        elif value >= 1_000:
-            return f"{value / 1_000:.0f}K"
-        return str(value)
-    
     def _add_match_with_composition(self, parent: tk.Frame, match: Dict[str, Any]):
         """Add a match row with mineral composition breakdown."""
         # Main container
@@ -155,12 +152,23 @@ class OverlayPopup:
         category = match.get('category', '')
         
         # Match categories from scanner.py
-        if category == 'space_deposit' or match_type == 'space_deposits':
+        if category == 'ship_mining' or match_type == 'ship_mining':
+            tier = match.get('tier', '').lower()
+            if tier in ('legendary', 'epic'):
+                color = "#f85149"   # Red — extreme value
+            elif tier == 'rare':
+                color = "#a371f7"   # Purple — high value
+            elif tier == 'uncommon':
+                color = self.MINING_COLOR  # Orange — medium value
+            else:
+                color = self.MUTED_COLOR   # Grey — common
+            icon = "🪨"
+        elif category == 'space_deposit' or match_type == 'space_deposits':
             color = self.MINING_COLOR
-            icon = "🪨"  # Asteroid
+            icon = "🪨"
         elif category == 'surface_deposit' or match_type == 'surface_deposits':
             color = self.MINING_COLOR
-            icon = "⛏️"  # Surface deposit
+            icon = "⛏️"
         elif match_type == 'ground_deposit' or category == 'ground_deposits':
             variant = match.get('variant', '')
             if variant == 'small':
@@ -172,6 +180,9 @@ class OverlayPopup:
         elif match_type == 'salvage':
             color = self.SALVAGE_COLOR
             icon = "🔧"
+        elif match_type == 'salvage_debris':
+            color = self.SALVAGE_COLOR
+            icon = "🪛"
         elif match_type == 'known':
             color = self.MINING_COLOR
             icon = "📡"
@@ -194,35 +205,30 @@ class OverlayPopup:
         )
         name_label.pack(side=tk.LEFT)
         
-        # Estimated value
-        est_value = match.get('est_value')
-        if est_value:
-            value_label = tk.Label(
-                header_row,
-                text=f"~{self._format_value(est_value)} aUEC",
-                font=self._scaled_font("Consolas", 11, "bold"),
-                fg="#3fb950",  # Green for money
-                bg=self.BG_COLOR
-            )
-            value_label.pack(side=tk.RIGHT)
-        
         # Mining method indicator
-        if category == 'space_deposit' or match_type == 'space_deposits':
-            mining_method = "🚀 Ship Mining (mixed composition)"
+        if category == 'ship_mining' or match_type == 'ship_mining':
+            tier = match.get('tier', '').capitalize()
+            mining_method = f"🚀 Ship Mining — {tier} tier"
+            method_color = self.SHIP_COLOR
+        elif category == 'space_deposit' or match_type == 'space_deposits':
+            mining_method = "🚀 Ship Mining"
             method_color = self.SHIP_COLOR
         elif category == 'surface_deposit' or match_type == 'surface_deposits':
-            mining_method = "🚀 Ship Mining (mixed composition)"
+            mining_method = "🚀 Ship Mining"
             method_color = self.SHIP_COLOR
         elif match_type == 'ground_deposit' or category == 'ground_deposits':
             variant = match.get('variant', '')
             if variant == 'small':
-                mining_method = "💎 Hand Mining (100% single mineral)"
+                mining_method = "💎 Hand Mining"
                 method_color = "#a371f7"  # Purple
             else:
-                mining_method = "🚗 ROC Mining (100% single mineral)"
+                mining_method = "🚗 ROC Mining"
                 method_color = "#a371f7"  # Purple
         elif match_type == 'salvage':
             mining_method = "🔧 Hull Scraping"
+            method_color = self.SALVAGE_COLOR
+        elif match_type == 'salvage_debris':
+            mining_method = "🪛 Wreck Debris — Tractor Beam / Collect"
             method_color = self.SALVAGE_COLOR
         elif match_type == 'known':
             mining_method = None
@@ -245,23 +251,42 @@ class OverlayPopup:
             )
             method_label.pack(side=tk.LEFT)
         
-        # Composition table (only for mixed composition deposits)
-        composition = match.get('composition', [])
         single_mineral = match.get('single_mineral', False)
         
         if single_mineral:
-            # Single mineral deposit - show possible minerals
+            # Single mineral deposit — two sub-cases:
+            # 1. ship_mining: mineral is KNOWN from the signature (show it definitively)
+            # 2. ground deposit: mineral is unknown (show possible list)
+            mineral_known = match.get('mineral') and category == 'ship_mining'
             possible_minerals = match.get('possible_minerals', [])
             info_row = tk.Frame(container, bg=self.BG_LIGHT)
             info_row.pack(fill=tk.X, pady=(int(5 * self.scale), 0))
-            
-            if possible_minerals:
+
+            if mineral_known:
+                # Known mineral — show definitively
+                tk.Label(
+                    info_row,
+                    text="Dominant mineral:",
+                    font=self._scaled_font("Consolas", 9),
+                    fg=self.MUTED_COLOR,
+                    bg=self.BG_LIGHT,
+                    padx=10
+                ).pack(anchor=tk.W, pady=(5, 0))
+                tk.Label(
+                    info_row,
+                    text=match.get('mineral', ''),
+                    font=self._scaled_font("Consolas", 11, "bold"),
+                    fg="#3fb950",
+                    bg=self.BG_LIGHT,
+                    padx=10
+                ).pack(anchor=tk.W, pady=(0, 5))
+            elif possible_minerals:
                 minerals_text = ", ".join(possible_minerals[:5])  # Show first 5
                 if len(possible_minerals) > 5:
                     minerals_text += f" (+{len(possible_minerals) - 5} more)"
                 tk.Label(
                     info_row,
-                    text=f"100% purity - one of:",
+                    text="Possible mineral:",
                     font=self._scaled_font("Consolas", 9),
                     fg=self.MUTED_COLOR,
                     bg=self.BG_LIGHT,
@@ -286,143 +311,6 @@ class OverlayPopup:
                     pady=5
                 ).pack(anchor=tk.W)
             
-        elif composition:
-            # Table header
-            table_header = tk.Frame(container, bg=self.BG_LIGHT)
-            table_header.pack(fill=tk.X, pady=(int(5 * self.scale), 0))
-            
-            tk.Label(
-                table_header,
-                text="Mineral",
-                font=self._scaled_font("Consolas", 9, "bold"),
-                fg=self.MUTED_COLOR,
-                bg=self.BG_LIGHT,
-                width=14,
-                anchor=tk.W
-            ).pack(side=tk.LEFT, padx=(5, 0))
-            
-            tk.Label(
-                table_header,
-                text="Prob",
-                font=self._scaled_font("Consolas", 9, "bold"),
-                fg=self.MUTED_COLOR,
-                bg=self.BG_LIGHT,
-                width=6,
-                anchor=tk.E
-            ).pack(side=tk.LEFT)
-            
-            tk.Label(
-                table_header,
-                text="Med%",
-                font=self._scaled_font("Consolas", 9, "bold"),
-                fg=self.MUTED_COLOR,
-                bg=self.BG_LIGHT,
-                width=6,
-                anchor=tk.E
-            ).pack(side=tk.LEFT)
-            
-            tk.Label(
-                table_header,
-                text="Value",
-                font=self._scaled_font("Consolas", 9, "bold"),
-                fg=self.MUTED_COLOR,
-                bg=self.BG_LIGHT,
-                width=8,
-                anchor=tk.E
-            ).pack(side=tk.LEFT, padx=(0, 5))
-            
-            # Table rows (show ALL minerals)
-            for i, ore in enumerate(composition):
-                row_bg = self.BG_LIGHT if i % 2 == 0 else self.BG_COLOR
-                row = tk.Frame(container, bg=row_bg)
-                row.pack(fill=tk.X)
-                
-                # Color code by UEX price per SCU
-                ore_price = ore.get('price', 0)
-                ore_value = ore.get('value', 0)
-                
-                if ore_price >= 25000:
-                    ore_color = "#3fb950"      # Green - premium
-                elif ore_price >= 10000:
-                    ore_color = "#f0883e"      # Orange - medium
-                else:
-                    ore_color = "#f85149"      # Red - low
-                
-                # Mineral name
-                tk.Label(
-                    row,
-                    text=ore.get('name', '?'),
-                    font=self._scaled_font("Consolas", 9),
-                    fg=ore_color,
-                    bg=row_bg,
-                    width=14,
-                    anchor=tk.W
-                ).pack(side=tk.LEFT, padx=(5, 0))
-                
-                # Probability (grey)
-                prob = ore.get('prob', 0)
-                prob_text = f"{prob:.0%}" if prob <= 1 else f"{prob:.1f}x"
-                tk.Label(
-                    row,
-                    text=prob_text,
-                    font=self._scaled_font("Consolas", 9),
-                    fg=self.MUTED_COLOR,
-                    bg=row_bg,
-                    width=6,
-                    anchor=tk.E
-                ).pack(side=tk.LEFT)
-                
-                # Median percentage (grey)
-                med_pct = ore.get('medPct', 0)
-                tk.Label(
-                    row,
-                    text=f"{med_pct:.0%}",
-                    font=self._scaled_font("Consolas", 9),
-                    fg=self.MUTED_COLOR,
-                    bg=row_bg,
-                    width=6,
-                    anchor=tk.E
-                ).pack(side=tk.LEFT)
-                
-                # Value
-                value_text = self._format_value(ore_value) if ore_value > 0 else "-"
-                tk.Label(
-                    row,
-                    text=value_text,
-                    font=self._scaled_font("Consolas", 9),
-                    fg="#3fb950" if ore_value > 0 else self.MUTED_COLOR,
-                    bg=row_bg,
-                    width=8,
-                    anchor=tk.E
-                ).pack(side=tk.LEFT, padx=(0, 5))
-            
-            # Helper text
-            helper_frame = tk.Frame(container, bg=self.BG_COLOR)
-            helper_frame.pack(anchor=tk.W, pady=(int(5 * self.scale), 0))
-            
-            tk.Label(
-                helper_frame,
-                text="Prob = Probability that mineral will spawn",
-                font=self._scaled_font("Segoe UI", 8),
-                fg=self.MUTED_COLOR,
-                bg=self.BG_COLOR
-            ).pack(anchor=tk.W)
-            
-            tk.Label(
-                helper_frame,
-                text="Med% = Median amount of mineral if spawned",
-                font=self._scaled_font("Segoe UI", 8),
-                fg=self.MUTED_COLOR,
-                bg=self.BG_COLOR
-            ).pack(anchor=tk.W)
-            
-            tk.Label(
-                helper_frame,
-                text="Value = Average value of mineral if spawned",
-                font=self._scaled_font("Segoe UI", 8),
-                fg=self.MUTED_COLOR,
-                bg=self.BG_COLOR
-            ).pack(anchor=tk.W)
     
     def _position_window(self):
         """Position the window based on settings."""
@@ -445,7 +333,7 @@ class OverlayPopup:
         if self.window:
             try:
                 self.window.destroy()
-            except:
+            except tk.TclError:
                 pass
             self.window = None
     
@@ -454,18 +342,14 @@ class OverlayPopup:
         if self._after_id and self.window:
             try:
                 self.window.after_cancel(self._after_id)
-            except:
+            except tk.TclError:
                 pass
         if self.window:
             try:
                 self.window.destroy()
-            except:
+            except tk.TclError:
                 pass
             self.window = None
-        try:
-            self._root.destroy()
-        except:
-            pass
 
 
 class PositionAdjuster:

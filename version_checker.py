@@ -9,7 +9,7 @@ import json
 from typing import Tuple, Optional
 
 # Current version - update this with each release
-CURRENT_VERSION = "3.4.0"
+CURRENT_VERSION = "4.2.1"
 
 # GitHub repository info - UPDATE THESE when repo is created
 GITHUB_OWNER = "Diftic"

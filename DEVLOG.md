@@ -3,8 +3,8 @@
 **Project:** SC Signature Scanner  
 **Location:** `C:\Users\larse\PycharmProjects\AREA52\SC_Signature_Scanner\`  
 **Developer:** Mallachi  
-**Current Version:** v3.4.0
-**Development Period:** January 8, 2026 - February 6, 2026
+**Current Version:** v4.2.1
+**Development Period:** January 8, 2026 - ongoing
 
 ---
 
@@ -41,12 +41,209 @@ The devlog shall always contain a clear "Current Status" or "Next Steps" section
 ### Core Features
 - Screenshot folder monitoring with automatic signature detection
 - OCR-based signature value extraction from game HUD
-- Database matching for asteroids, surface deposits, ground deposits, salvage
-- Estimated value calculation using live UEX pricing data
-- Mineral composition display for mining targets
+- Database matching for asteroids, surface deposits, ground deposits, salvage, and wreck debris
 - Tobii Eye Tracker 5 integration (optional, deferred)
 - Manual scan region configuration (fallback)
-- Regolith.rocks API integration for rock composition data
+
+---
+
+## Changelog
+
+### 2026-03-18 — v4.2.1: Overlay label corrections (PTU data reconciliation)
+
+In-game testing revealed the overlay was displaying "100% pure mineral: Torite" for ship mining matches. PTU composition data (`mining_data-4.7.0-ptu.11450623.json`) confirmed rocks have a dominant mineral (40–80%) plus secondary minerals (5–20%) — they are NOT guaranteed 100% pure.
+
+**Changes made to `overlay.py`:**
+- Ship mining confirmed mineral label: `"100% pure mineral:"` → `"Dominant mineral:"`
+- Ground deposit small method label: `"💎 Hand Mining (100% single mineral)"` → `"💎 Hand Mining"`
+- Ground deposit large method label: `"🚗 ROC Mining (100% single mineral)"` → `"🚗 ROC Mining"`
+- Ground deposit unknown mineral list label: `"100% purity - one of:"` → `"Possible mineral:"`
+
+**Also added in this session:**
+- `SignatureValue.md`: Full rewrite for SC 4.7. Per-mineral signature system documented with secondary mineral columns from PTU data. Old I/C/S/P/M/Q/E content removed.
+- `data/mining_data-4.7.0-ptu.11450623.json`: PTU composition source file added to data folder.
+- `combat_analyst_db.json`: `composition` and `_description` fields updated to reflect dominant mineral language.
+- `TODO.md`: Added Windows OCR (WinRT) investigation item; added deferred ship ID feature entry.
+- `ship_scan_test.md`: Data collection template for empirical ship CS scanning (deferred pending SC scanner rework).
+
+**Note:** Ground deposits are still 100% single-mineral per cluster — the cluster rules are accurate. The correction applies only to ship-mining rocks which have mixed composition.
+
+---
+
+### 2026-03-18 — v4.2.0: Removed pricing/API system
+
+SC 4.7 deposits are 100% single-mineral per cluster (no mixed composition), making value estimation from composition data unnecessary. The Regolith.rocks API and UEX pricing integrations were removed entirely.
+
+**Removed from main.py:**
+- `row3` UI block: REFINERY METHOD dropdown + DATA SOURCES status panel
+- 12 methods: `_init_pricing`, `_on_method_changed`, `_get_current_yield`, `_refresh_pricing`, `_change_api_key`, `_refresh_all_data`, `_update_api_status`, `_update_pricing_status`, `_validate_api_key_startup`, `_validate_key_with_retry`, `_check_regolith_cache`, `_show_api_key_dialog`
+- Startup API key validation gate
+- Config load/save: `refinery_method` field
+- `import time` (only used in retry method)
+
+**Removed from scanner.py** (done in prior session): `import pricing`, `_get_rock_value_and_composition`, `est_value`/`composition` fields from matches.
+
+**Removed from overlay.py** (done in prior session): `est_value` display, composition table, `est_price_per_scu`.
+
+**Note:** `pricing.py` and `regolith_api.py` kept on disk but no longer imported anywhere.
+
+---
+
+### 2026-03-18 — v4.1.0: SC 4.7 salvage debris signatures
+
+SC 4.7 added new salvage gameplay with sized wreck debris entities that have distinct signatures.
+
+**New salvage signatures extracted from Game2.xml:**
+- 1700 = Small Wreck Debris (Avenger-class hull pieces + scrap cargo containers)
+- 1850 = Medium Wreck Debris (Ares Inferno-class hull pieces)
+- 2000 = Salvage Panels / FPS Active Scrap (unchanged)
+- 2400 = Large Wreck Debris (C2 Hercules-class hull pieces)
+- 3000 = Capital Wreck Debris (890 Jump-class hull pieces) — **COLLISION** with FPS ground deposit small
+
+**New collision noted:** 3000 now collides between FPS small ground deposits and 890 Jump capital wreck debris. Both matches will be shown when 3000 is scanned. Context-dependent (space = likely debris, planet = likely ground deposit).
+
+**Changes made:**
+- `combat_analyst_db.json`: Updated `salvage` section to new structure (panels + debris dict). Added 1700, 1850, 2400 to `signature_lookup`. Updated 3000 entry with collision note.
+- `scanner.py:_build_lookups`: Loads `salvage.panels._base_signature` and all `salvage.debris` entries into `salvage_debris_types` list. All debris sigs added to `known_base_signatures` for OCR correction.
+- `scanner.py:match_signature`: Added debris check loop after panels check. Produces `salvage_debris` type matches.
+- `overlay.py`: Added `salvage_debris` handling — screwdriver icon, "Wreck Debris — Tractor Beam / Collect" method label.
+- `main.py`: About tab updated with full salvage signature table.
+- `version_checker.py`: Bumped to v4.1.0.
+- `clean.py` / `build.py`: Updated shebangs to `python`, added Python 3.13 guard in build, tool cache cleanup, `nul` artifact cleanup.
+- `.gitignore`: Rewritten UTF-8, added tool caches, `nul`, data cache files.
+
+**Also investigated (no changes):** Ship cross-section signatures — confirmed standardised per model (3D vector, not a single HUD value, dynamic — not suitable for static lookup).
+
+---
+
+### 2026-03-18 — v4.0.0: SC 4.7 per-mineral signature system (breaking change)
+
+**The SC 4.7 mining system is completely different from 4.6.**
+
+The old I/C/S/P/M/Q/E asteroid type system is REMOVED in SC 4.7. The new system uses per-mineral signatures: each mineral has a unique signature value that directly identifies it, whether it appears in an asteroid or a surface rock.
+
+**New signature architecture (SC 4.7):**
+- Legendary tier (3170-3200): Quantainium, Stileron, Savrilium
+- Epic tier (3370-3400): Ouratite, Riccite, Lindinium
+- Rare tier (3540-3600): Beryl, Taranite, Borase, Gold, Bexalite
+- Uncommon tier (3825-3900): Laranite, Aslarite, Titanium, Tungsten, Agricium, Torite
+- Common tier (4180-4300): Hephaestanite, Tin, Quartz, Corundum, Copper, Silicon, Iron, Aluminum, Ice
+- Ground FPS (3000) and GV/ROC (4000) unchanged
+- Salvage (2000) unchanged
+
+**Changes made:**
+- `combat_analyst_db.json`: Complete restructure. Removed `space_deposits`, `surface_deposits`, `rare_asteroids`. New `ship_mining` section with tiered mineral entries.
+- `scanner.py:_build_lookups`: Now reads tiered mineral structure. Each sig maps directly to a known mineral.
+- `scanner.py:match_signature`: Ship-mining matches now include `mineral`, `tier`, and per-SCU price. No Regolith composition lookup needed (rock is 100% single mineral).
+- `overlay.py`: New `ship_mining` category handling with tier-based colour coding (red=legendary/epic, purple=rare, orange=uncommon, grey=common). Confirmed mineral shown definitively, not as a "possible list".
+- `main.py`: About tab updated to show new tier ranges.
+- Version: 3.5.0 → 4.0.0
+
+**Version 4.0.0 rationale:** Major breaking change — all old type-based signatures (4700-4900) are invalid in SC 4.7.
+
+---
+
+### 2026-03-18 — v3.5.0: SC 4.7 signature database update + C-1 fix
+
+**Source:** `Game2.xml` extracted via unp4k-suite v3.13.66 from SC 4.7 Data.p4k
+
+**C-1 resolved:** Ground deposit large (ROC/GV) base signature was **incorrectly 3000** in the DB. Confirmed via 4.7 DCB as **4000**. Updated `combat_analyst_db.json` and `scanner.py` fallback defaults.
+
+**All existing values confirmed unchanged in SC 4.7:**
+- Space: I=4000, C=4700, S=4720, P=4750, M=4850, Q=4870, E=4900
+- Surface deposits: 4000 (all types)
+- FPS small ground: 3000
+- Salvage panels: 2000
+
+**NEW — Rare asteroid mineral variants (not in previous DB):**
+- Beryl: 3540, Taranite: 3555, Borase: 3570, Gold: 3585, Bexalite: 3600
+- These have unique sub-4000 signatures distinguishable from standard types
+
+**NEW — Undetectable items confirmed:**
+- Vlk Pearls, Vlk Irradiated Pearls, Flowstone = signature 0
+
+**NEW — Ground deposit minerals:**
+- Added Sadaryx, Janalite, Saldynium, Carinite to minerals list (found in DCB, not in previous survey)
+
+**L-1 fixed:** About tab now shows `Small (3000)` and `Large (4000)` instead of stale `120`/`620` values.
+
+**Version bumped:** 3.4.0 → 3.5.0
+
+**Files changed:** `data/combat_analyst_db.json`, `scanner.py`, `main.py`, `version_checker.py`, `TODO.md`
+
+---
+
+### 2026-03-18 — Fix: code review findings H-1 through M-8
+
+Batch fix for all findings from code_review.md that are independent of the C-1 signature value verification.
+
+**H-1 — Bare `except:` blocks → `except tk.TclError:`**
+- `overlay.py`: 5 occurrences in `show()`, `_hide()`, `destroy()` teardown paths
+- `splash.py`: 2 occurrences in `pump()` and `close()`
+
+**H-3 — `os.system` shell injection → `subprocess.run`**
+- `main.py:_open_debug_folder`: macOS and Linux paths now use list-form subprocess, bypassing shell
+
+**H-4 — Triple Regolith API call reduced to one**
+- `regolith_api.py:fetch_all_data`: single `fetch_survey_data` call, loop over response keys
+- Error now stored in `result["_rock_composition_error"]` instead of silently discarded
+
+**H-5 — `time.sleep(3)` on main thread → event-loop pump**
+- `main.py:_validate_key_with_retry`: replaced with a 3-second deadline loop calling `root.update()` every 50ms — UI stays responsive during retry wait
+
+**L-6 — `os._exit(0)` → `sys.exit(0)`**
+- `main.py:exit_and_download`: replaced `os._exit` (bypasses cleanup) with `root.quit()` + `sys.exit(0)`
+
+**M-3 — `OverlayPopup` second `tk.Tk()` eliminated**
+- `overlay.py`: constructor now accepts `root: tk.Tk`; no longer creates its own hidden root
+- `main.py`: all three call sites updated to pass `root=self.root`
+- `destroy()` no longer calls `self._root.destroy()` (does not own the root)
+
+**M-2 — `Config.get()` repeated file reads → in-memory cache**
+- `config.py`: added `self._cache`; `load()` returns cached copy on repeat calls; `save()` updates cache
+
+**M-5 — Config and region paths now use `paths.get_user_data_path()`**
+- `config.py`: default config path now `paths.get_user_data_path() / "config.json"`
+- `region_selector.py`: `CONFIG_FILE` now `paths.get_user_data_path() / "scan_region.json"`
+- Both configs now persist correctly in PyInstaller frozen builds
+
+**M-4 — `PricingManager` data dir default fixed**
+- `pricing.py`: default `data_dir` now `paths.get_user_data_path() / "data"`; UEX cache persists across frozen exe restarts
+
+**M-6 — Singleton race condition in `regolith_api.get_api()`**
+- `regolith_api.py`: added `threading.Lock()` guarding `_instance` creation
+
+**M-7 — O(n) list dedup in `_extract_signatures` → O(1) set**
+- `scanner.py`: replaced `raw_values` list membership check with a `seen: set[int]`
+
+**M-8 — Type annotation corrections**
+- `scanner.py`: `Optional[callable]` → `Optional[Callable[[], None]]` for download callbacks
+- `scanner.py`: `output_dir: Path = None` → `output_dir: Optional[Path] = None`
+
+**L-4 — Hot-path `import cv2` inside methods → module-level**
+- `scanner.py`: `cv2` now imported at module level with `HAS_CV2` flag; inline imports removed
+
+**CURRENT_EPOCH updated**
+- `regolith_api.py`: `"4.4"` → `"4.6"` to match app version and database
+
+**Files changed:** `main.py`, `overlay.py`, `splash.py`, `regolith_api.py`, `config.py`, `region_selector.py`, `pricing.py`, `scanner.py`
+
+---
+
+### 2026-03-18 — Fix: thread-safe UI updates in `_on_new_screenshot` (C-2)
+
+**Problem:** `_on_new_screenshot` is called by the watchdog file monitor on a background thread.
+Multiple calls to `self._log()` (modifying a `tk.Text` widget) and `self.stats_label.configure()`
+were made directly from that thread. Tkinter is not thread-safe on Windows; these off-thread widget
+calls cause intermittent UI corruption and crashes during active screenshot scanning.
+
+**Fix:** Refactored `_on_new_screenshot` so the OCR scan (`scanner.scan_image`) continues running
+on the background thread (it is the expensive work and must not block the main loop), but all
+collected log lines, the stats counter increment, and any overlay display are dispatched to the
+main thread in a single `self.root.after(0, _ui_update)` call. The overlay display was already
+correctly deferred — this fix makes the log and stats consistent with that pattern.
+
+**Files:** `main.py:1285–1340`
 
 ---
 
@@ -558,6 +755,61 @@ First OCR use:
 - Signature 4000 collision (I-type + all surface deposits) — CIG-side, awaiting SC 4.7 fix
 
 **Ready for:** Fresh install testing, distribution to testers
+
+**Session Log - February 11, 2026 (Sessions 14-15): Game2.dcb Signature Extraction**
+
+**Phase 1: P4K Search (Session 14)**
+- SC patch dropped today (Data.p4k grew ~1GB). Created `search_mining_data.py` to search for changed mining signature values.
+- Searched 1,287,040 files in Data.p4k: 11,710 mining-related files, 8,894 readable files extracted.
+- **FINDING:** Mining signature values are NOT in loose XML/JSON files — compiled into `Game2.dcb` (DataCore Binary, 298MB decompressed).
+
+**Phase 2: DCB Parsing (Session 15)**
+- Built custom Game2.dcb parser from scratch using StarBreaker C# source as reference.
+- Key technical corrections from initial v1 parser:
+  - DataType enum values corrected (e.g., Single=0x0B not 0x0F)
+  - Struct/property names use string table 2, not table 1
+  - Value pool file order differs from header order (Boolean after UInt64)
+  - Record definitions are 32 bytes, not 36
+  - DataMapping-based offset calculation for data section
+
+**Phase 3: Signature Value Discovery**
+- Entity-to-signature chain traced through 4 struct layers:
+  1. EntityClassDefinition → Components (StrongPointer array in strong pool)
+  2. SSCSignatureSystemParams → radarProperties (inline StrongPointer @ byte 4)
+  3. SSCRadarContactProperites → baseSignatureParams (inline StrongPointer @ byte 20)
+  4. SSCSignatureSystemBaseSignatureParams → signatures (SimpleArray into Single pool)
+- Signature value is at index 4 of an 8-element float32 array in the Single value pool.
+- Key insight: BSP instances have ZERO StrongPointer pool entries (not accessed via pointers). They're accessed through inline StrongPointers in the struct data chain.
+
+**Phase 4: Results**
+- Successfully extracted signatures for 301 mineable/salvage entities.
+- **SPACE ASTEROIDS — ALL UNCHANGED:**
+  - I=4000, C=4700, S=4720, P=4750, M=4850, Q=4870, E=4900
+- **SURFACE DEPOSITS — UNCHANGED:** All types (Atacamite, Felsic, Gneiss, Granite, Igneous, Obsidian, Quartzite, Shale) = 4000
+- **FPS MINING ROCKS — UNCHANGED:** All types (Hadanite, Dolivine, Aphorite, etc.) = 3000
+- **SALVAGE PANELS — UNCHANGED:** SalvageLock/SalvageScrap = 2000
+- **CAVE DEPOSITS:** 4000 (same as surface)
+- **ROC/GV MINING ROCKS — DISCREPANCY:** All 6 GroundVehicle entities = 4000 (DB says 3000)
+  - `MineableRock_GroundVehicle_Carinite/Beradom/Feynmaline/Glacosite` + variants
+  - Cannot determine if this changed in this patch or was always 4000
+  - Needs in-game verification
+
+**Additional Findings:**
+- Salvageable ship wrecks have varying signatures by hull size (1700-3000)
+- Harvestable mineral pickups (1-hand) retain old signature of 120
+- Flowstone and VlkMineablePearls have 0 signature (special items)
+- 8-element signature array channels: [EM(?), IR(?), ?, ?, CrossSection, ?, ?, ?]
+
+**Scripts Created (in sc_data_extractor project):**
+- `parse_dcb_v2.py` — Corrected DCB parser with StarBreaker-accurate format
+- `extract_signatures.py` — Targeted BSP instance extraction
+- `trace_mining_signatures.py` — Entity→component chain tracer
+- `dump_all_signatures.py` — Full BSP instance dump
+- `debug_entity_mapping.py` — Entity→BSP mapping diagnostics
+- `debug_bsp_refs.py` — BSP reference mechanism discovery
+- `extract_all_signatures.py` — Final production extraction script
+
+**OUTPUT:** `extracted_shops/mining_signatures_extracted.json` — complete entity-to-signature mapping
 
 **Session Log - February 6, 2026 (Session 13):**
 - **REMOVE:** Ship radar cross-section data (252 entries) from `combat_analyst_db.json` — dead data, never used in matching
