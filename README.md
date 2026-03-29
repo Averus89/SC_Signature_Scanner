@@ -20,7 +20,7 @@ Real-time signature identification tool for Star Citizen. Monitors your screensh
 
 <img src="Images/Settings.png" width="600" alt="Settings Tab">
 
-**Defining the scan region** — Click and drag directly over the signature value on your HUD to tell the scanner exactly where to look. Only needs to be done once.
+**Defining the scan region** — Opens an existing screenshot. Click and drag directly over the signature value on your HUD to tell the scanner exactly where to look. Only needs to be done once.
 
 <img src="Images/Setting scan region.png" width="600" alt="Scan Region Configuration">
 
