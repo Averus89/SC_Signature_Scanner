@@ -2,30 +2,42 @@
 
 [![Buy Me A Coffee](https://img.shields.io/badge/Buy%20Me%20A%20Coffee-Support-orange?style=flat&logo=buy-me-a-coffee)](https://buymeacoffee.com/Mallachi)
 
-Real-time signature identification tool for Star Citizen. Monitors your screenshot folder and automatically identifies asteroids, deposits, and salvage targets from in-game signature values.
+Real-time signature identification tool for Star Citizen. Monitors your screenshot folder and automatically identifies asteroids, surface deposits, ground deposits, and salvage targets from in-game signature values.
 
-**Version:** 3.1.8  
+**Version:** 4.2.1
 **Author:** Mallachi
+**Game Version:** Star Citizen 4.7+
+
+---
+
+## Screenshots
+
+<img src="images/Mainpage.png" width="600" alt="Main Scanner Window">
+
+<img src="images/Settings.png" width="600" alt="Settings Tab">
+
+<img src="images/Setting scan region.png" width="600" alt="Scan Region Configuration">
+
+<img src="images/Test Pop-Up.png" width="400" alt="Test Overlay Popup">
+
+<img src="images/About.png" width="600" alt="About Tab">
+
+---
 
 ## Features
 
 ### Core Scanning
 - **Automatic OCR** — Extracts signature values from screenshots using EasyOCR deep learning
-- **Mining Identification** — Identifies asteroids (I/C/S/P/M/Q/E-type), surface deposits, and ground deposits (FPS/ROC)
-- **Salvage Detection** — Hull panel count estimation from salvage signatures
+- **SC 4.7 Per-Mineral Identification** — Identifies the dominant mineral of ship-mined rocks by signature value (Legendary through Common tiers)
+- **Ground Deposit Detection** — Distinguishes FPS (3000) and ROC/Vehicle (4000) deposit sizes
+- **Salvage Detection** — Identifies hull panels and wreck debris by size class
 - **Configurable Scan Region** — Define exactly where signatures appear on your screen for faster, more accurate detection
-
-### Data & Pricing
-- **Live Pricing** — Real-time ore values from UEX Corp API
-- **Mineral Composition** — Probable mineral spawns and their values via Regolith.rocks API
-- **Multiple Refinery Methods** — 9 refinery yield options (Dinyx, Ferron, Cormack, etc.) for accurate value estimates
-- **Automatic Data Caching** — Caches API data locally for offline use and faster startups
 
 ### Overlay Display
 - **In-Game Overlay Popup** — Non-intrusive results display over the game
 - **Customizable Position** — Drag-to-position overlay anywhere on screen
 - **Adjustable Scale** — 50% to 200% size scaling
-- **Configurable Duration** — 1-30 seconds display time
+- **Configurable Duration** — 1–30 seconds display time
 
 ### Monitoring & Workflow
 - **Folder Monitoring** — Automatically detects new screenshots in your SC screenshot folder
@@ -40,19 +52,14 @@ Real-time signature identification tool for Star Citizen. Monitors your screensh
 - **Test Popup** — Preview overlay appearance with sample data
 - **Splash Screen** — Loading progress display during startup
 
-## Screenshots
-
-<img src="images/main_window.png" width="600" alt="Main Scanner Window">
-
-<img src="images/overlay_popup.png" width="400" alt="Overlay Popup">
-
-<img src="images/settings.png" width="600" alt="Settings Tab">
+---
 
 ## Requirements
 
 - **Windows 10/11**
 - **Star Citizen** in Windowed or Borderless Windowed mode
-- **Regolith.rocks API Key** — Free, required for rock composition data
+
+---
 
 ## Quick Start
 
@@ -61,15 +68,14 @@ Real-time signature identification tool for Star Citizen. Monitors your screensh
 1. Download the latest release
 2. Extract the `SC_Signature_Scanner` folder
 3. Run `SC_Signature_Scanner.exe`
-4. Enter your Regolith.rocks API key when prompted
-5. Configure your scan region in Settings
-6. Start monitoring and take screenshots in-game!
+4. Configure your scan region in Settings
+5. Start monitoring and take screenshots in-game!
 
 ### For Developers (Python)
 
 ```bash
 # Clone and install
-git clone https://github.com/OWNER/SC_Signature_Scanner.git
+git clone https://github.com/Mallachi/SC_Signature_Scanner.git
 cd SC_Signature_Scanner
 pip install -r requirements.txt
 
@@ -77,7 +83,9 @@ pip install -r requirements.txt
 python main.py
 ```
 
-**Note:** First run downloads ~115MB of OCR models to `~/.EasyOCR/model/`
+> **Note:** First run downloads ~115MB of OCR models to `~/.EasyOCR/model/`
+
+---
 
 ## Usage
 
@@ -93,56 +101,54 @@ python main.py
    - In-game: Press PrintScreen when you see a signature
    - Results appear in an overlay popup
 
-## Signature Reference
+---
 
-### Space Deposits (Asteroids)
-Ship mining with Prospector/MOLE. Mixed mineral composition.
+## Signature Reference (SC 4.7+)
 
-| Type | Base Signature |
-|------|----------------|
-| I-type | 1660 |
-| C-type | 1700 |
-| S-type | 1720 |
-| P-type | 1750 |
-| M-type | 1850 |
-| Q-type | 1870 |
-| E-type | 1900 |
+> SC 4.7 replaced the old rock-type system (I/C/S/P/M/Q/E) with a per-mineral signature system. The signature value now identifies the **dominant mineral** in the rock (40–80% composition). Rocks also contain secondary minerals at lower concentrations.
 
-### Surface Deposits
-Ship mining with Prospector/MOLE. Mixed mineral composition.
+### Ship Mining — Asteroids & Surface Deposits
 
-| Type | Base Signature |
-|------|----------------|
-| Shale | 1730 |
-| Felsic | 1770 |
-| Obsidian | 1790 |
-| Atacamite | 1800 |
-| Quartzite | 1820 |
-| Gneiss | 1840 |
-| Granite | 1920 |
-| Igneous | 1950 |
+| Tier | Signature Range | Minerals |
+|------|----------------|---------|
+| **Legendary** | 3170–3200 | Quantainium (3170), Stileron (3185), Savrilium (3200) |
+| **Epic** | 3370–3400 | Ouratite (3370), Riccite (3385), Lindinium (3400) |
+| **Rare** | 3540–3600 | Beryl (3540), Taranite (3555), Borase (3570), Gold (3585), Bexalite (3600) |
+| **Uncommon** | 3825–3900 | Laranite (3825), Aslarite (3840), Titanium (3855), Tungsten (3870), Agricium (3885), Torite (3900) |
+| **Common** | 4180–4300 | Hephaestanite (4180), Tin (4195), Quartz (4210), Corundum (4225), Copper (4240), Silicon (4255), Iron (4270), Aluminum (4285), Ice (4300) |
+
+Applies to both asteroids and surface deposits (Prospector/MOLE).
 
 ### Ground Deposits
-100% single mineral purity per cluster.
 
-| Variant | Base Signature | Method |
-|---------|----------------|--------|
-| Small | 120 | FPS/Hand mining |
-| Large | 620 | ROC/Vehicle mining |
+100% single mineral per cluster. Signature identifies **size**, not mineral type.
+
+| Variant | Signature | Method |
+|---------|-----------|--------|
+| Small | 3000 | FPS / Hand mining |
+| Large | 4000 | ROC / Vehicle mining |
+
+**Possible minerals:** Hadanite, Dolivine, Aphorite, Beradom, Glacosite, Feynmaline, Jaclium, Sadaryx, Janalite, Saldynium, Carinite
+
+> **Note:** Large ground deposits (4000) share a signature with Common-tier ship-mining rocks. Context (planet surface vs. space) is required to distinguish them.
 
 ### Salvage
-| Type | Signature |
-|------|-----------|
-| Hull Panel | 2000 each |
 
-## Formulas
+| Type | Signature | Notes |
+|------|-----------|-------|
+| Hull Panels / Active Scrap | 2000 | Per panel — 2000 × N |
+| Small Debris | 1700 | Avenger-class wrecks, scrap cargo containers |
+| Medium Debris | 1850 | Ares Inferno-class wrecks |
+| Large Debris | 2400 | C2 Hercules-class wrecks |
+| Capital Debris | 3000 | 890 Jump-class wrecks |
 
-```
-Mining:  rock_count = total_signature ÷ base_signature
-Salvage: panel_count = signature ÷ 2000
-```
+> **Collision:** Capital debris (3000) shares a signature with FPS small ground deposits. Use context to distinguish.
 
-Example: Signature 5100 = 3× C-type asteroids (1700 × 3)
+### Undetectable
+
+Vlk Pearls, Vlk Irradiated Pearls, and Flowstone have a signature of 0 and cannot be detected by this scanner.
+
+---
 
 ## Configuration
 
@@ -152,10 +158,11 @@ Settings saved to `config.json`:
 |---------|-------------|
 | Screenshot folder | Path to Star Citizen screenshots |
 | Overlay position | Screen coordinates for popup |
-| Overlay duration | Seconds to display (1-30) |
-| Overlay scale | Size multiplier (0.5-2.0) |
+| Overlay duration | Seconds to display (1–30) |
+| Overlay scale | Size multiplier (0.5–2.0) |
 | Debug mode | Save OCR processing images |
-| Refinery yield | For value calculations (default 85%) |
+
+---
 
 ## File Structure
 
@@ -165,11 +172,11 @@ SC_Signature_Scanner/
 ├── _internal/                # Runtime dependencies
 │   └── data/
 │       └── combat_analyst_db.json
-│
-├── config.json              # User settings (created on first run)
-├── scan_region.json         # Scan region config
-└── regolith_cache.json      # Cached rock compositions
+├── config.json               # User settings (created on first run)
+└── scan_region.json          # Scan region config
 ```
+
+---
 
 ## Troubleshooting
 
@@ -187,29 +194,30 @@ SC_Signature_Scanner/
 - Check overlay position isn't off-screen
 
 **Wrong identification**
-- Multiple deposit types can have similar signatures
-- Results sorted by confidence (count-based)
-- Lower counts are more likely
+- Signature 4000 matches Large Ground Deposits, Common-tier ship rocks, and old Surface Deposits — context required
+- Signature 3000 matches FPS Ground Deposits and Capital (890 Jump) wreck debris — context required
 
 **Slow startup**
-- Normal — PyTorch/EasyOCR takes 15-20 seconds to load
+- Normal — PyTorch/EasyOCR takes 15–20 seconds to load
 - Splash screen shows loading progress
+
+---
 
 ## Data Sources
 
-- **Signatures:** Extracted from Star Citizen game files (Data.p4k)
-- **Rock Compositions:** [Regolith.rocks](https://regolith.rocks) API
-- **Ore Prices:** [UEX Corp](https://uexcorp.space) API
+- **Signatures:** Extracted directly from Star Citizen game files (`Game2.dcb` via `Data.p4k`)
+
+---
 
 ## Credits
 
 - **Developer:** Mallachi
-- **Rock Data:** Regolith.rocks team
-- **Pricing Data:** UEX Corp
-- **Testing:** Regolith.rocks community
+- ✦ *In memory of Regolith.Rocks — The Industrial Community*
+
+---
 
 ## License
 
-MIT License - Free to use, modify, and distribute. See [LICENSE](LICENSE) for details.
+MIT License — Free to use, modify, and distribute. See [LICENSE](LICENSE) for details.
 
-Not affiliated with Cloud Imperium Games or Roberts Space Industries.
+*Not affiliated with Cloud Imperium Games or Roberts Space Industries.*
