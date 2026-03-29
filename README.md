@@ -12,15 +12,29 @@ Real-time signature identification tool for Star Citizen. Monitors your screensh
 
 ## Screenshots
 
+**Main Scanner window** — Set your Star Citizen screenshot folder, start/stop monitoring, and watch the detection log update in real time as screenshots are processed.
+
 <img src="Images/Mainpage.png" width="600" alt="Main Scanner Window">
+
+**Settings tab** — Configure the scan region coordinates, overlay position, popup duration and scale, debug output folder, and save your settings.
 
 <img src="Images/Settings.png" width="600" alt="Settings Tab">
 
+**Defining the scan region** — Click and drag directly over the signature value on your HUD to tell the scanner exactly where to look. Only needs to be done once.
+
 <img src="Images/Setting scan region.png" width="600" alt="Scan Region Configuration">
+
+**Test popup** — Preview what the overlay will look like before going in-game. This example shows a Torite (Uncommon) identification at signature 3,900.
 
 <img src="Images/Test Pop-Up.png" width="400" alt="Test Overlay Popup">
 
+**About tab** — Quick reference for all signature types and ranges, setup instructions, and credits.
+
 <img src="Images/About.png" width="600" alt="About Tab">
+
+**In-game overlay** — The identification result appears as a small overlay directly over the game while you're flying. The popup auto-hides after a configurable duration.
+
+<img src="Images/Ingame function.png" width="600" alt="In-Game Overlay">
 
 ---
 
