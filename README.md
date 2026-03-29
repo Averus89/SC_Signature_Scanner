@@ -12,15 +12,15 @@ Real-time signature identification tool for Star Citizen. Monitors your screensh
 
 ## Screenshots
 
-<img src="images/Mainpage.png" width="600" alt="Main Scanner Window">
+<img src="Images/Mainpage.png" width="600" alt="Main Scanner Window">
 
-<img src="images/Settings.png" width="600" alt="Settings Tab">
+<img src="Images/Settings.png" width="600" alt="Settings Tab">
 
-<img src="images/Setting scan region.png" width="600" alt="Scan Region Configuration">
+<img src="Images/Setting scan region.png" width="600" alt="Scan Region Configuration">
 
-<img src="images/Test Pop-Up.png" width="400" alt="Test Overlay Popup">
+<img src="Images/Test Pop-Up.png" width="400" alt="Test Overlay Popup">
 
-<img src="images/About.png" width="600" alt="About Tab">
+<img src="Images/About.png" width="600" alt="About Tab">
 
 ---
 
