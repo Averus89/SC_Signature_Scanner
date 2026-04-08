@@ -1,0 +1,428 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>SC Signature Scanner</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --bg:        #0d1117;
+      --surface:   #161b22;
+      --surface2:  #21262d;
+      --border:    #30363d;
+      --text:      #e6edf3;
+      --muted:     #8b949e;
+      --accent:    #f0883e;
+      --accent-lt: #ffa657;
+      --cyan:      #58a6ff;
+      --success:   #3fb950;
+      --salvage:   #a371f7;
+      --radius:    6px;
+    }
+
+    body {
+      background: var(--bg);
+      color: var(--text);
+      font-family: "Segoe UI", system-ui, sans-serif;
+      font-size: 16px;
+      line-height: 1.65;
+    }
+
+    a { color: var(--accent); text-decoration: none; }
+    a:hover { text-decoration: underline; color: var(--accent-lt); }
+
+    .container { max-width: 880px; margin: 0 auto; padding: 0 24px; }
+
+    /* ── Hero ── */
+    .hero {
+      padding: 72px 24px 48px;
+      border-bottom: 1px solid var(--border);
+      text-align: center;
+      position: relative;
+      overflow: hidden;
+    }
+    .hero::before {
+      content: "";
+      position: absolute;
+      inset: 0;
+      background: radial-gradient(ellipse 60% 40% at 50% 0%, rgba(240,136,62,.08) 0%, transparent 70%);
+      pointer-events: none;
+    }
+    .hero-icon { font-size: 2.8rem; margin-bottom: 16px; display: block; }
+    .hero h1 { font-size: 2.4rem; font-weight: 700; letter-spacing: -0.5px; }
+    .hero h1 span { color: var(--accent); }
+    .hero p {
+      color: var(--muted);
+      font-size: 1.05rem;
+      max-width: 520px;
+      margin: 14px auto 0;
+    }
+    .badge-row {
+      display: flex;
+      justify-content: center;
+      gap: 10px;
+      flex-wrap: wrap;
+      margin-top: 20px;
+    }
+    .badge-row img { height: 22px; }
+
+    /* ── Download ── */
+    .download-wrap { text-align: center; padding: 40px 24px 32px; border-bottom: 1px solid var(--border); }
+    .btn-download {
+      display: inline-flex;
+      align-items: center;
+      gap: 10px;
+      background: var(--accent);
+      color: #000;
+      font-weight: 700;
+      font-size: 1.05rem;
+      padding: 14px 32px;
+      border-radius: var(--radius);
+      transition: background 0.15s;
+    }
+    .btn-download:hover { background: var(--accent-lt); text-decoration: none; color: #000; }
+    .btn-download svg { width: 20px; height: 20px; fill: #000; }
+    .dl-note { color: var(--muted); font-size: 0.85rem; margin-top: 10px; }
+
+    /* ── Sections ── */
+    section { padding: 52px 0; border-bottom: 1px solid var(--border); }
+    section h2 {
+      font-size: 1.3rem;
+      font-weight: 600;
+      margin-bottom: 24px;
+      color: var(--accent);
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+    section h2::after {
+      content: "";
+      flex: 1;
+      height: 1px;
+      background: var(--border);
+    }
+
+    /* ── Feature grid ── */
+    .feature-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+      gap: 14px;
+    }
+    .feature-card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 16px 18px;
+    }
+    .feature-card .icon { font-size: 1.3rem; margin-bottom: 6px; }
+    .feature-card h3 { font-size: 0.9rem; font-weight: 600; margin-bottom: 4px; color: var(--text); }
+    .feature-card p  { font-size: 0.85rem; color: var(--muted); }
+
+    /* ── Signature table ── */
+    .sig-section h3 {
+      font-size: 1rem;
+      font-weight: 600;
+      color: var(--accent-lt);
+      margin: 24px 0 10px;
+    }
+    .sig-section h3:first-child { margin-top: 0; }
+    table { width: 100%; border-collapse: collapse; font-size: 0.9rem; }
+    th {
+      text-align: left;
+      padding: 8px 12px;
+      background: var(--surface2);
+      color: var(--muted);
+      font-weight: 600;
+      font-size: 0.8rem;
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+      border-bottom: 1px solid var(--border);
+    }
+    td {
+      padding: 7px 12px;
+      border-bottom: 1px solid var(--border);
+      color: var(--text);
+    }
+    tr:last-child td { border-bottom: none; }
+    tbody tr:hover td { background: var(--surface); }
+    .tier-legendary { color: #f85149; font-weight: 600; }
+    .tier-epic      { color: var(--salvage); font-weight: 600; }
+    .tier-rare      { color: var(--accent-lt); font-weight: 600; }
+    .tier-uncommon  { color: var(--accent); }
+    .tier-common    { color: var(--muted); }
+    .sig-note {
+      margin-top: 10px;
+      font-size: 0.82rem;
+      color: var(--muted);
+      padding-left: 12px;
+      border-left: 2px solid var(--border);
+    }
+
+    /* ── How it works ── */
+    .steps { display: flex; flex-direction: column; gap: 12px; }
+    .step {
+      display: flex;
+      gap: 18px;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 18px 20px;
+    }
+    .step-num {
+      flex-shrink: 0;
+      width: 32px; height: 32px;
+      border-radius: 50%;
+      background: var(--accent);
+      color: #000;
+      font-weight: 700;
+      font-size: 0.95rem;
+      display: flex; align-items: center; justify-content: center;
+    }
+    .step-body h3 { font-size: 0.95rem; font-weight: 600; margin-bottom: 4px; }
+    .step-body p  { font-size: 0.875rem; color: var(--muted); }
+
+    /* ── Limitations ── */
+    .limit-list { list-style: none; display: flex; flex-direction: column; gap: 10px; }
+    .limit-list li {
+      font-size: 0.9rem;
+      color: var(--muted);
+      padding-left: 20px;
+      position: relative;
+    }
+    .limit-list li::before {
+      content: "⚠";
+      position: absolute;
+      left: 0;
+      color: #d29922;
+      font-size: 0.8rem;
+      top: 1px;
+    }
+
+    /* ── Code ── */
+    pre {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 14px 18px;
+      font-family: "Consolas", "Cascadia Code", monospace;
+      font-size: 0.875rem;
+      overflow-x: auto;
+      color: #cdd9e5;
+    }
+
+    /* ── Footer ── */
+    footer {
+      padding: 28px 0;
+      text-align: center;
+      color: var(--muted);
+      font-size: 0.85rem;
+    }
+    footer a { color: var(--muted); }
+    footer a:hover { color: var(--accent); text-decoration: none; }
+
+    @media (max-width: 540px) {
+      .hero h1 { font-size: 1.8rem; }
+      .step { flex-direction: column; gap: 10px; }
+      table { font-size: 0.8rem; }
+      th, td { padding: 6px 8px; }
+    }
+  </style>
+</head>
+<body>
+
+  <!-- Hero -->
+  <div class="hero">
+    <div class="container">
+      <span class="hero-icon">📡</span>
+      <h1>SC <span>Signature Scanner</span></h1>
+      <p>Real-time target identification for Star Citizen. Screenshot → OCR → overlay in seconds.</p>
+      <div class="badge-row">
+        <a href="https://buymeacoffee.com/Mallachi" target="_blank">
+          <img src="https://img.shields.io/badge/Buy%20Me%20A%20Coffee-Support-orange?style=flat&logo=buy-me-a-coffee" alt="Buy Me A Coffee" />
+        </a>
+        <a href="https://github.com/Diftic/SC_Signature_Scanner/releases/latest" target="_blank">
+          <img src="https://img.shields.io/github/v/release/Diftic/SC_Signature_Scanner?label=latest&color=f0883e" alt="Latest Release" />
+        </a>
+      </div>
+    </div>
+  </div>
+
+  <!-- Download -->
+  <div class="download-wrap">
+    <a class="btn-download" href="https://github.com/Diftic/SC_Signature_Scanner/releases/latest/download/SC_Signature_Scanner.exe">
+      <svg viewBox="0 0 16 16"><path d="M7.47 10.78a.75.75 0 0 0 1.06 0l3.75-3.75a.75.75 0 0 0-1.06-1.06L8.75 8.44V1.75a.75.75 0 0 0-1.5 0v6.69L4.78 5.97a.75.75 0 0 0-1.06 1.06l3.75 3.75ZM3.75 13a.75.75 0 0 0 0 1.5h8.5a.75.75 0 0 0 0-1.5h-8.5Z"/></svg>
+      Download SC_Signature_Scanner.exe
+    </a>
+    <p class="dl-note">Windows 10 / 11 &nbsp;·&nbsp; ~2 MB &nbsp;·&nbsp; No install required &nbsp;·&nbsp; v5.0.0</p>
+  </div>
+
+  <div class="container">
+
+    <!-- Features -->
+    <section>
+      <h2>Features</h2>
+      <div class="feature-grid">
+        <div class="feature-card">
+          <div class="icon">📸</div>
+          <h3>Auto Screenshot Monitoring</h3>
+          <p>Watches your SC screenshot folder. Every new screenshot is scanned automatically.</p>
+        </div>
+        <div class="feature-card">
+          <div class="icon">🧠</div>
+          <h3>Deep Learning OCR</h3>
+          <p>EasyOCR extracts the signature value from your HUD with morphological noise filtering.</p>
+        </div>
+        <div class="feature-card">
+          <div class="icon">🪨</div>
+          <h3>Ship Mining</h3>
+          <p>Identifies the dominant mineral in asteroids and surface deposits across all tiers.</p>
+        </div>
+        <div class="feature-card">
+          <div class="icon">⛏️</div>
+          <h3>Ground Deposits</h3>
+          <p>Distinguishes FPS hand-mining (3000) from ROC/vehicle deposits (4000).</p>
+        </div>
+        <div class="feature-card">
+          <div class="icon">🔧</div>
+          <h3>Salvage</h3>
+          <p>Hull panels, and wreck debris from Avenger-class up to 890 Jump capital wrecks.</p>
+        </div>
+        <div class="feature-card">
+          <div class="icon">🖥️</div>
+          <h3>In-Game Overlay</h3>
+          <p>Always-on-top popup shows the match result. Drag to position. Configurable duration.</p>
+        </div>
+        <div class="feature-card">
+          <div class="icon">📐</div>
+          <h3>Configurable Scan Region</h3>
+          <p>Draw a box over the signature HUD element once — scanner uses it every time.</p>
+        </div>
+        <div class="feature-card">
+          <div class="icon">🔄</div>
+          <h3>Auto-Update Check</h3>
+          <p>Notifies on startup when a new version is available, with a direct download link.</p>
+        </div>
+      </div>
+    </section>
+
+    <!-- Signature Reference -->
+    <section>
+      <h2>Signature Reference — SC 4.7+</h2>
+      <div class="sig-section">
+
+        <h3>Ship Mining — Asteroids &amp; Surface Deposits</h3>
+        <table>
+          <thead><tr><th>Tier</th><th>Signature Range</th><th>Minerals</th></tr></thead>
+          <tbody>
+            <tr><td class="tier-legendary">Legendary</td><td>3170–3200</td><td>Quantainium, Stileron, Savrilium</td></tr>
+            <tr><td class="tier-epic">Epic</td><td>3370–3400</td><td>Ouratite, Riccite, Lindinium</td></tr>
+            <tr><td class="tier-rare">Rare</td><td>3540–3600</td><td>Beryl, Taranite, Borase, Gold, Bexalite</td></tr>
+            <tr><td class="tier-uncommon">Uncommon</td><td>3825–3900</td><td>Laranite, Aslarite, Titanium, Tungsten, Agricium, Torite</td></tr>
+            <tr><td class="tier-common">Common</td><td>4180–4300</td><td>Hephaestanite, Tin, Quartz, Corundum, Copper, Silicon, Iron, Aluminum, Ice</td></tr>
+          </tbody>
+        </table>
+        <p class="sig-note">The signature identifies the dominant mineral (40–80% composition). Rocks also contain secondary minerals at lower concentrations.</p>
+
+        <h3>Ground Deposits</h3>
+        <table>
+          <thead><tr><th>Variant</th><th>Signature</th><th>Method</th></tr></thead>
+          <tbody>
+            <tr><td>Small</td><td>3000</td><td>FPS / Hand mining</td></tr>
+            <tr><td>Large</td><td>4000</td><td>ROC / Vehicle mining</td></tr>
+          </tbody>
+        </table>
+        <p class="sig-note">100% single mineral per cluster. Signature identifies size, not mineral type. Minerals: Hadanite, Dolivine, Aphorite, Beradom, Glacosite, Feynmaline, Jaclium, and others.</p>
+
+        <h3>Salvage</h3>
+        <table>
+          <thead><tr><th>Type</th><th>Signature</th><th>Notes</th></tr></thead>
+          <tbody>
+            <tr><td>Hull Panels / Active Scrap</td><td>2000</td><td>Per panel — 2000 × N</td></tr>
+            <tr><td>Small Debris</td><td>1700</td><td>Avenger-class, scrap cargo containers</td></tr>
+            <tr><td>Medium Debris</td><td>1850</td><td>Ares Inferno-class wrecks</td></tr>
+            <tr><td>Large Debris</td><td>2400</td><td>C2 Hercules-class wrecks</td></tr>
+            <tr><td>Capital Debris</td><td>3000</td><td>890 Jump-class wrecks</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <!-- How it works -->
+    <section>
+      <h2>How It Works</h2>
+      <div class="steps">
+        <div class="step">
+          <div class="step-num">1</div>
+          <div class="step-body">
+            <h3>Configure scan region</h3>
+            <p>Take one screenshot with a signature visible. In Settings, draw a box over the signature area on your HUD. Saved permanently — only needed once.</p>
+          </div>
+        </div>
+        <div class="step">
+          <div class="step-num">2</div>
+          <div class="step-body">
+            <h3>Set screenshot folder &amp; start monitoring</h3>
+            <p>Point the app at your Star Citizen screenshot folder and click Start Monitoring. The watcher runs silently in the background.</p>
+          </div>
+        </div>
+        <div class="step">
+          <div class="step-num">3</div>
+          <div class="step-body">
+            <h3>Press PrintScreen in-game</h3>
+            <p>When you see a signature on your targeting HUD, take a screenshot. The scanner detects the new file automatically.</p>
+          </div>
+        </div>
+        <div class="step">
+          <div class="step-num">4</div>
+          <div class="step-body">
+            <h3>Read the overlay</h3>
+            <p>An always-on-top popup appears over the game with the identification result — mineral name, tier, and mining method. Auto-hides after a configurable duration.</p>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Known Limitations -->
+    <section>
+      <h2>Known Limitations</h2>
+      <ul class="limit-list">
+        <li>Signature 4000 collides: Large ground deposits share 4000 with Common-tier ship-mining rocks. Use context (planet vs. space) to distinguish.</li>
+        <li>Signature 3000 collides: FPS small ground deposits and 890 Jump capital wreck debris share 3000. Context required.</li>
+        <li>Vlk Pearls, Vlk Irradiated Pearls, and Flowstone have signature 0 — undetectable by this scanner.</li>
+        <li>Star Citizen must be in Windowed or Borderless Windowed mode for the overlay to appear over the game.</li>
+        <li>First startup downloads ~115 MB of OCR model files. Subsequent startups use the local cache.</li>
+      </ul>
+    </section>
+
+    <!-- From Source -->
+    <section>
+      <h2>Run from Source</h2>
+      <pre><code>git clone https://github.com/Diftic/SC_Signature_Scanner.git
+cd SC_Signature_Scanner
+pip install -r requirements.txt
+python main.py</code></pre>
+      <p style="margin-top:12px; color:var(--muted); font-size:0.875rem;">Requires Python 3.10+ on Windows 10 / 11. PyTorch CPU build recommended (see requirements.txt comments).</p>
+    </section>
+
+  </div>
+
+  <!-- Footer -->
+  <footer>
+    <div class="container">
+      <p>
+        Made by <a href="https://buymeacoffee.com/Mallachi" target="_blank">Mallachi</a>
+        &nbsp;·&nbsp;
+        <a href="https://github.com/Diftic/SC_Signature_Scanner" target="_blank">GitHub</a>
+        &nbsp;·&nbsp;
+        <a href="https://github.com/Diftic/SC_Signature_Scanner/releases" target="_blank">Releases</a>
+        &nbsp;·&nbsp;
+        <span style="font-size:0.8rem;">✦ In memory of Regolith.Rocks</span>
+      </p>
+      <p style="margin-top:8px; font-size:0.78rem;">Not affiliated with Cloud Imperium Games or Roberts Space Industries.</p>
+    </div>
+  </footer>
+
+</body>
+</html>

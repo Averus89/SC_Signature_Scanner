@@ -4,7 +4,7 @@
 
 Real-time signature identification tool for Star Citizen. Monitors your screenshot folder and automatically identifies asteroids, surface deposits, ground deposits, and salvage targets from in-game signature values.
 
-**Version:** 4.2.1
+**Version:** 5.0.0
 **Author:** Mallachi
 **Game Version:** Star Citizen 4.7+
 
@@ -89,7 +89,7 @@ Real-time signature identification tool for Star Citizen. Monitors your screensh
 
 ```bash
 # Clone and install
-git clone https://github.com/Mallachi/SC_Signature_Scanner.git
+git clone https://github.com/Diftic/SC_Signature_Scanner.git
 cd SC_Signature_Scanner
 pip install -r requirements.txt
 
