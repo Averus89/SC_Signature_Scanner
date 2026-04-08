@@ -276,12 +276,13 @@
     }
     .screenshot-grid {
       display: grid;
-      grid-template-columns: 1.6fr 1fr;
+      grid-template-columns: 1fr;
       gap: 14px;
-      align-items: start;
     }
-    .screenshot-grid .main-shot {
-      grid-row: span 2;
+    .screenshot-bottom {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 14px;
     }
     .screenshot-frame {
       background: var(--surface2);
@@ -302,9 +303,8 @@
       font-size: 0.78rem;
       color: var(--text-dim);
     }
-    @media (max-width: 680px) {
-      .screenshot-grid { grid-template-columns: 1fr; }
-      .screenshot-grid .main-shot { grid-row: span 1; }
+    @media (max-width: 580px) {
+      .screenshot-bottom { grid-template-columns: 1fr; }
     }
 
     /* ─────────────────────────────
@@ -709,17 +709,19 @@
     <div class="container">
       <p class="showcase-label">See it in action</p>
       <div class="screenshot-grid">
-        <div class="screenshot-frame main-shot">
+        <div class="screenshot-frame">
           <img src="Images/Ingame function.png" alt="SC Signature Scanner overlay shown in-game" />
           <div class="screenshot-caption">In-game overlay — identified target with tier, mineral, and mining method</div>
         </div>
-        <div class="screenshot-frame">
-          <img src="Images/Mainpage.png" alt="Main application window" />
-          <div class="screenshot-caption">Main window — monitoring status and scan log</div>
-        </div>
-        <div class="screenshot-frame">
-          <img src="Images/Test Pop-Up.png" alt="Overlay popup result" />
-          <div class="screenshot-caption">Overlay popup — always-on-top result display</div>
+        <div class="screenshot-bottom">
+          <div class="screenshot-frame">
+            <img src="Images/Mainpage.png" alt="Main application window" />
+            <div class="screenshot-caption">Main window — monitoring status and scan log</div>
+          </div>
+          <div class="screenshot-frame">
+            <img src="Images/Test Pop-Up.png" alt="Overlay popup result" />
+            <div class="screenshot-caption">Overlay popup — always-on-top result display</div>
+          </div>
         </div>
       </div>
     </div>
