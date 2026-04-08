@@ -1,5 +1,147 @@
 # SC Signature Scanner - Status
 
+---
+
+## Planned: Full Security & Quality Pass → v5.0.0 Release
+
+Same pipeline as ShaderCacheNuke v3.0.0. Work through each phase in order.
+
+---
+
+### Phase 1 — Red Team Analysis
+
+Run `/red-team` against all source modules. This project has a larger attack surface than ShaderCacheNuke:
+- EasyOCR processes image data from a user-controlled screenshot folder (potential malformed image attacks)
+- `webbrowser.open(self.download_url)` in `theme.py:UpdateBanner._open_download` — same unvalidated URL issue as ShaderCacheNuke F-002
+- `os.system()` in `main.py:1497-1499` for opening the debug folder — shell injection surface (already flagged in code review, needs adversarial PoC)
+- `os._exit(0)` in `main.py:1663` — bypasses cleanup, potential state corruption
+- Update check result handling — verify URL validation exists or is absent
+- Screenshot folder path — user-configurable; what happens if it points to a network share or reparse point?
+- Config file load/save — is the config path validated? Can a malicious config inject values?
+- Watchdog observer runs on a background thread with callbacks into tkinter — privilege/injection surface?
+
+**Output:** `RED_TEAM_REPORT.md` in project root
+
+---
+
+### Phase 2 — Code Review
+
+Run `/code-review` against all source modules. The existing code review findings in this file (Priority 1–4 section below) are a head start — the fresh review should confirm, expand, or supersede them.
+
+Key areas to focus on given what we already know:
+- Thread safety bug in `_on_new_screenshot` (`main.py:1285-1332`) — tkinter called from watchdog background thread
+- Multiple `tk.Tk()` roots (`overlay.py:42`) — `OverlayPopup` should use `Toplevel`
+- 8+ bare `except:` clauses (`overlay.py`, `splash.py`, `main.py`) — catch specific exceptions
+- `os._exit(0)` → `sys.exit(0)` (`main.py:1663`)
+- `main.py` monolith (2,283 lines, God class) — `_create_ui()` split
+- Update check tuple-length result disambiguation — replace with named result type
+- Dead code: `paths.py:get_asset_path()`, `pricing.py` (entire file), `regolith_api.py` (entire file)
+- Magic numbers scattered across `scanner.py`, `overlay.py`, `main.py`, `monitor.py`
+- `RegolithTheme.create_card()` exists but is never used — DRY violation in `_create_ui`
+- Color palette duplicated in `OverlayPopup` and `PositionAdjuster` instead of referencing `RegolithTheme.COLORS`
+- Zero test coverage — `scanner.py` signature extraction and matching logic is untested
+
+**Output:** `CODE_REVIEW_REPORT.md` in project root
+
+---
+
+### Phase 3 — Post-Review Synthesis
+
+Compare both reports. Identify:
+- Findings that appear in both (highest confidence — fix first)
+- Findings unique to red-team (exploitability proof exists)
+- Findings unique to code review (correctness/quality issues)
+- Any attack chains (e.g., unvalidated update URL + `os._exit` bypass)
+
+**Output:** `POST_REVIEW_ANALYSIS.md` in project root with cross-reference table and prioritised fix list
+
+---
+
+### Phase 4 — Implement Fixes ✓ COMPLETE
+
+#### Security (from red-team expected findings)
+- [x] Validate `download_url` in `UpdateBanner._open_download` — `theme.py`, `main.py:exit_and_download`, `version_checker._validate_release_url`
+- [x] `os.system()` was already replaced in prior session — confirmed using `subprocess.run()`
+- [x] Validate screenshot folder path — `_is_reparse_point()` guard added to `_start_monitoring`
+- [x] Validate debug folder path — `_is_reparse_point()` guard added to `_browse_debug_folder`
+- [x] `release_url` validated at source in `version_checker.py`
+
+#### Bugs (Priority 1)
+- [x] Thread safety — already fixed in prior session (all UI via `root.after()`)
+- [x] Multiple Tk() roots for OverlayPopup — already fixed in prior session
+- [x] Bare `except:` clauses — already fixed in prior session
+- [x] `os._exit(0)` — already fixed in prior session (`sys.exit(0)`)
+- [x] `import os` missing — added to `main.py`
+- [x] `_test_screenshot` blocking GUI — now runs `_on_new_screenshot` on background thread
+
+#### Quality (Priority 2–4)
+- [x] Delete dead files: `pricing.py`, `regolith_api.py`
+- [x] Remove unused `paths.py:get_asset_path()`
+- [x] Fix update check 4-tuple/3-tuple disambiguation — separate `_update_check_error` attribute
+- [x] Extract named constants — `scanner.py`, `monitor.py`
+- [x] Replace duplicated color class variables in `overlay.py` with `RegolithTheme.COLORS` references
+- [x] Remove dead `RegolithTheme.create_card()` from `theme.py`
+- [x] Remove dead `requests` from `requirements.txt`
+- [x] Fix `.webp`/`.bmp` missing from existing-file enumeration in `_start_monitoring`
+- [x] File size cap + eager load in `scanner.py:_load_image`
+- [x] Narrow `except Exception` in `version_checker.py`
+- [x] Remove dead `HAS_CV2` try/except guard in `scanner.py`
+
+#### Deferred (out of scope for this pass)
+- `main.py` monolith refactor — high effort, low risk; defer to a dedicated session
+- Test suite (`tests/scanner.py`) — valuable but a separate workstream
+- Splash `Tk()` root (S-003) — works in practice; fix in dedicated session
+
+---
+
+### Phase 5 — Version Bump to v5.0.0 ✓ COMPLETE
+
+- [x] Updated `version_checker.py:CURRENT_VERSION` to `5.0.0`
+- [x] Updated `DEVLOG.md` with full v5.0.0 changelog
+- [x] Updated `TODO.md`
+
+---
+
+### Phase 6 — Build
+
+- [ ] Run `build.py` (ensure `--uac-admin` flag is present — add it if not)
+- [ ] Verify exe launches, self-elevates, and passes a basic smoke test
+- [ ] Check exe size is reasonable (EasyOCR bundles are large — note the size)
+
+---
+
+### Phase 7 — Git & Release
+
+- [ ] Commit all changes with semantic message: `feat: v5.0.0 — security hardening and quality fixes`
+- [ ] Push to `origin/main`
+- [ ] Create GitHub Release `v5.0.0` via `gh release create`
+- [ ] Attach built `.exe` as release asset
+- [ ] Verify update checker in v4.2.1 installs will detect v5.0.0
+
+---
+
+### Phase 8 — README Update
+
+Rewrite README to accurately reflect the current tool. Current README (if it exists) likely describes an older version. Should cover:
+- What the tool does (OCR-based signature scanning from screenshots)
+- Supported deposit types (space asteroids, surface, ground, salvage, rare variants)
+- How it works (watchdog monitors screenshot folder → EasyOCR reads signature → overlay displays match)
+- Requirements (Windows 10/11, SC screenshot folder path, admin not required)
+- Quick start (exe vs from source)
+- Known signature collisions (4000 collision, 3000 collision)
+- Build instructions
+
+---
+
+### Phase 9 — GitHub Pages Landing Page
+
+- [ ] Create `index.html` in repo root — dark sci-fi theme consistent with the app's `RegolithTheme` aesthetic (orange accent `#f0883e`, dark backgrounds)
+- [ ] Sections: hero + download button, what it does, supported deposit types table, how it works, known limitations, from-source instructions, footer
+- [ ] Ensure GitHub Pages is enabled on `main` branch root
+- [ ] Verify site renders at `https://<owner>.github.io/<repo>/`
+
+---
+
 ## Application Version: 4.2.1
 ## Database Version: 4.7 (for Star Citizen 4.7)
 ## OCR Engine: EasyOCR (deep learning)

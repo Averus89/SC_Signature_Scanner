@@ -7,21 +7,24 @@ Shows signature identification results on top of the game.
 import tkinter as tk
 from typing import List, Dict, Any, Optional, Tuple, Callable
 
+from theme import RegolithTheme
+
 
 class OverlayPopup:
     """Always-on-top overlay popup for showing signature results."""
-    
-    # Colors - matching RegolithTheme
-    BG_COLOR = "#0d1117"      # Dark background
-    BG_LIGHT = "#161b22"      # Card background
-    BORDER_COLOR = "#30363d"  # Border
-    FG_COLOR = "#e6edf3"      # Primary text
-    ACCENT_COLOR = "#f0883e"  # Orange accent
-    HEADER_COLOR = "#ffa657"  # Header orange
-    SHIP_COLOR = "#58a6ff"    # Cyan for ships
-    MINING_COLOR = "#f0883e"  # Orange for mining
-    SALVAGE_COLOR = "#a371f7" # Purple for salvage
-    MUTED_COLOR = "#8b949e"   # Muted text
+
+    # Colors — sourced from RegolithTheme so palette changes propagate here automatically
+    _C = RegolithTheme.COLORS
+    BG_COLOR = _C['bg_dark']
+    BG_LIGHT = _C['bg_main']
+    BORDER_COLOR = _C['border']
+    FG_COLOR = _C['text_primary']
+    ACCENT_COLOR = _C['accent_primary']
+    HEADER_COLOR = _C['accent_secondary']
+    SHIP_COLOR = _C['cyan']
+    MINING_COLOR = _C['accent_primary']
+    SALVAGE_COLOR = "#a371f7"  # salvage purple — not in RegolithTheme palette
+    MUTED_COLOR = _C['text_secondary']
     
     def __init__(
         self,
@@ -338,17 +341,18 @@ class OverlayPopup:
 
 class PositionAdjuster:
     """Draggable window for setting overlay position."""
-    
-    # Colors - matching RegolithTheme
-    BG_COLOR = "#0d1117"
-    BG_LIGHT = "#161b22"
-    BORDER_COLOR = "#30363d"
-    ACCENT_COLOR = "#f0883e"
-    CYAN = "#58a6ff"
-    TEXT_PRIMARY = "#e6edf3"
-    TEXT_MUTED = "#8b949e"
-    SUCCESS = "#3fb950"
-    ERROR = "#f85149"
+
+    # Colors — sourced from RegolithTheme so palette changes propagate here automatically
+    _C = RegolithTheme.COLORS
+    BG_COLOR = _C['bg_dark']
+    BG_LIGHT = _C['bg_main']
+    BORDER_COLOR = _C['border']
+    ACCENT_COLOR = _C['accent_primary']
+    CYAN = _C['cyan']
+    TEXT_PRIMARY = _C['text_primary']
+    TEXT_MUTED = _C['text_secondary']
+    SUCCESS = _C['success']
+    ERROR = _C['error']
     
     def __init__(self, parent: tk.Tk, current_position: Tuple[int, int] = None, 
                  on_save: Callable[[int, int], None] = None):

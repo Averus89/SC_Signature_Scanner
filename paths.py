@@ -42,11 +42,6 @@ def get_user_data_path() -> Path:
         return Path(__file__).parent
 
 
-def get_asset_path(asset_name: str) -> Path:
-    """Get the path to an asset file."""
-    return get_base_path() / "assets" / asset_name
-
-
 def get_debug_path() -> Path:
     """Get the path for debug output.
     

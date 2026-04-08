@@ -21,6 +21,7 @@ _splash = show_splash()
 # Now do the heavy imports with status updates
 _splash.set_status("Loading core modules...")
 import json
+import os
 import threading
 import tkinter as tk
 from tkinter import ttk, filedialog, messagebox
@@ -71,6 +72,16 @@ _splash.pump(10)
 import version_checker
 import region_selector
 _splash.pump(10)
+
+
+def _is_reparse_point(path: Path) -> bool:
+    """Return True if path is a symlink or Windows directory junction."""
+    if path.is_symlink():
+        return True
+    try:
+        return bool(path.stat().st_file_attributes & 0x400)  # FILE_ATTRIBUTE_REPARSE_POINT
+    except (OSError, AttributeError):
+        return False
 
 
 class SCSignatureScannerApp:
@@ -1063,7 +1074,11 @@ class SCSignatureScannerApp:
         if not folder or not Path(folder).exists():
             messagebox.showerror("Error", "Please select a valid screenshot folder")
             return
-        
+
+        if _is_reparse_point(Path(folder)):
+            messagebox.showerror("Error", "Screenshot folder cannot be a symlink or junction.")
+            return
+
         # Check if scan region is configured
         if not region_selector.is_configured():
             result = messagebox.askyesno(
@@ -1076,10 +1091,10 @@ class SCSignatureScannerApp:
                 self._define_scan_region()
                 return
         
-        # Mark existing files to ignore
-        self.processed_files = set(Path(folder).glob("*.png"))
-        self.processed_files.update(Path(folder).glob("*.jpg"))
-        self.processed_files.update(Path(folder).glob("*.jpeg"))
+        # Mark existing files to ignore (must match ScreenshotHandler.VALID_EXTENSIONS)
+        self.processed_files = set()
+        for ext in ("*.png", "*.jpg", "*.jpeg", "*.webp", "*.bmp"):
+            self.processed_files.update(Path(folder).glob(ext))
         self.screenshot_count = 0
         
         # Start monitor
@@ -1204,7 +1219,12 @@ class SCSignatureScannerApp:
             ]
         )
         if filepath:
-            self._on_new_screenshot(Path(filepath))
+            # Run OCR on a background thread — scan_image can take several seconds
+            threading.Thread(
+                target=self._on_new_screenshot,
+                args=(Path(filepath),),
+                daemon=True,
+            ).start()
     
     def _adjust_position(self):
         """Open position adjuster window."""
@@ -1325,6 +1345,9 @@ class SCSignatureScannerApp:
         """Browse for debug output folder."""
         folder = filedialog.askdirectory(title="Select Debug Output Folder")
         if folder:
+            if _is_reparse_point(Path(folder)):
+                messagebox.showerror("Error", "Debug folder cannot be a symlink or junction.")
+                return
             self.debug_folder_var.set(folder)
             if self.scanner:
                 self.scanner.debug_dir = Path(folder)
@@ -1343,13 +1366,14 @@ class SCSignatureScannerApp:
     def _check_for_updates(self):
         """Check for updates in background thread."""
         self._update_check_result = None
+        self._update_check_error = None
         self._update_check_done = False
 
         def check():
             try:
                 self._update_check_result = version_checker.check_for_updates()
             except Exception as e:
-                self._update_check_result = (False, None, None, str(e))
+                self._update_check_error = str(e)
             self._update_check_done = True
 
         threading.Thread(target=check, daemon=True).start()
@@ -1360,18 +1384,16 @@ class SCSignatureScannerApp:
     def _poll_update_result(self):
         """Poll for update check result from main thread."""
         if not self._update_check_done:
-            # Keep polling
             self.root.after(200, self._poll_update_result)
+            return
+
+        if self._update_check_error:
+            self._log(f"⚠ Version check failed: {self._update_check_error}")
             return
 
         result = self._update_check_result
         if result is None:
             self._log("⚠ Version check: no result")
-            return
-
-        # Check if error (4-tuple)
-        if len(result) == 4:
-            self._log(f"⚠ Version check failed: {result[3]}")
             return
 
         update_available, latest_version, download_url = result
@@ -1440,8 +1462,14 @@ class SCSignatureScannerApp:
         btn_frame.pack()
 
         def exit_and_download():
+            import urllib.parse
             import webbrowser
-            webbrowser.open(download_url)
+            try:
+                parsed = urllib.parse.urlparse(download_url)
+                if parsed.scheme in ('https', 'http') and parsed.netloc.endswith('github.com'):
+                    webbrowser.open(download_url)
+            except Exception:
+                pass
             dialog.destroy()
             self.root.quit()
             sys.exit(0)

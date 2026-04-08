@@ -5,11 +5,13 @@ Checks GitHub releases for updates.
 """
 
 import urllib.request
+import urllib.error
+import urllib.parse
 import json
 from typing import Tuple, Optional
 
 # Current version - update this with each release
-CURRENT_VERSION = "4.2.1"
+CURRENT_VERSION = "5.0.0"
 
 # GitHub repository info - UPDATE THESE when repo is created
 GITHUB_OWNER = "Diftic"
@@ -17,6 +19,18 @@ GITHUB_REPO = "SC_Signature_Scanner"
 
 # GitHub API URL for latest release
 RELEASES_URL = f"https://api.github.com/repos/{GITHUB_OWNER}/{GITHUB_REPO}/releases/latest"
+
+
+def _validate_release_url(url: str) -> bool:
+    """Return True only if url is an https/http GitHub URL."""
+    try:
+        parsed = urllib.parse.urlparse(url)
+        return (
+            parsed.scheme in ('https', 'http')
+            and parsed.netloc.endswith('github.com')
+        )
+    except Exception:
+        return False
 
 
 def _parse_version_tuple(version_str: str) -> Tuple[int, ...]:
@@ -61,24 +75,29 @@ def check_for_updates(timeout: int = 5) -> Tuple[bool, Optional[str], Optional[s
         tag_name = data.get('tag_name', '')
         latest_ver = tag_name.lstrip('v')
         
-        # Get download URL (HTML page for release)
+        # Get download URL (HTML page for release) and validate before returning
         html_url = data.get('html_url', '')
-        
+        if not _validate_release_url(html_url):
+            html_url = ''
+
         # Compare versions
         if latest_ver:
             is_newer = _parse_version_tuple(latest_ver) > _parse_version_tuple(CURRENT_VERSION)
             return (is_newer, latest_ver, html_url)
-        
+
         return (False, None, None)
-        
+
     except urllib.error.HTTPError as e:
         if e.code == 404:
-            # No releases yet
             return (False, None, None)
         print(f"HTTP error checking for updates: {e.code}")
         return (False, None, None)
-        
-    except Exception as e:
-        print(f"Error checking for updates: {e}")
+
+    except (urllib.error.URLError, TimeoutError):
+        return (False, None, None)
+
+    except (json.JSONDecodeError, KeyError, ValueError) as e:
+        import logging
+        logging.warning("Version check: malformed response — %s", e)
         return (False, None, None)
 

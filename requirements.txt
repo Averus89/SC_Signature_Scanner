@@ -21,5 +21,3 @@ opencv-python>=4.8.0
 # ===== File Monitoring =====
 watchdog>=3.0.0
 
-# ===== Networking =====
-requests>=2.31.0

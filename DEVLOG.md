@@ -3,7 +3,7 @@
 **Project:** SC Signature Scanner  
 **Location:** `C:\Users\larse\PycharmProjects\AREA52\SC_Signature_Scanner\`  
 **Developer:** Mallachi  
-**Current Version:** v4.2.1 — Released
+**Current Version:** v5.0.0 — In progress
 **Development Period:** January 8, 2026 - ongoing
 
 ---
@@ -48,6 +48,38 @@ The devlog shall always contain a clear "Current Status" or "Next Steps" section
 ---
 
 ## Changelog
+
+### 2026-04-08 — v5.0.0: Security hardening and quality pass
+
+Full red-team + code review + post-review pipeline. All findings addressed.
+
+**Security fixes (red team F-001 → F-005):**
+- `version_checker.py`: Added `_validate_release_url()` — rejects any `html_url` from GitHub API that isn't `https?://…github.com`. Narrows `except Exception` to `urllib.error.URLError`, `TimeoutError`, `json.JSONDecodeError`, `KeyError`, `ValueError`
+- `theme.py:UpdateBanner._open_download`: Added URL validation before `webbrowser.open()` (defence-in-depth)
+- `main.py:exit_and_download`: Added URL validation before `webbrowser.open()` (defence-in-depth)
+- `main.py:_start_monitoring`: Rejects screenshot folders that are symlinks or Windows directory junctions (`FILE_ATTRIBUTE_REPARSE_POINT`)
+- `main.py:_browse_debug_folder`: Same reparse point guard for debug output folder
+- `scanner.py:_load_image`: Added 50 MB file size cap and `img.load()` (forces eager read, closes OS file handle)
+- `requirements.txt`: Removed unused `requests>=2.31.0` — dead code from removed `regolith_api.py`
+
+**Crash fixes (code review B-001, B-002):**
+- `main.py`: Added missing `import os` — `os.startfile()` in `_open_debug_folder` was raising `NameError` on every click
+- `main.py:_test_screenshot`: Wrapped `_on_new_screenshot` call in `threading.Thread` — OCR scan was blocking the main thread and freezing the GUI for several seconds
+
+**Correctness fixes:**
+- `main.py:_check_for_updates`: Split error into separate `_update_check_error` attribute — eliminates fragile 4-tuple/3-tuple length sniffing at `_poll_update_result`
+- `main.py:_start_monitoring`: Existing-file enumeration now includes `.webp` and `.bmp` to match `ScreenshotHandler.VALID_EXTENSIONS`
+
+**Quality cleanup:**
+- `scanner.py`: Extracted `MIN_SIGNATURE`, `MAX_SIGNATURE`, `MIN_OCR_DIMENSION`, `MIN_COMPONENT_AREA`, `MAX_CLUSTER_COUNT`, `MAX_IMAGE_FILE_SIZE` as module-level constants; replaced all inline literals
+- `scanner.py`: Removed dead `HAS_CV2` try/except guard — `cv2` is a hard dependency already in `requirements.txt`; the guard masked `ImportError` as silent degradation
+- `monitor.py`: Extracted `_FILE_WRITE_TIMEOUT` and `_FILE_POLL_INTERVAL` constants
+- `overlay.py`: Both `OverlayPopup` and `PositionAdjuster` color class attributes now derive from `RegolithTheme.COLORS` — palette changes propagate automatically
+- `theme.py`: Removed dead `create_card()` classmethod (never called)
+- `paths.py`: Removed dead `get_asset_path()` function (never called, referenced non-existent `assets/` directory)
+- Deleted `pricing.py` and `regolith_api.py` — confirmed no active imports anywhere
+
+---
 
 ### 2026-03-18 — v4.2.1 patch: UI polish + build fix (post-release)
 

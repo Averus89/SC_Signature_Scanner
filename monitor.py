@@ -12,9 +12,13 @@ from watchdog.observers import Observer
 from watchdog.events import FileSystemEventHandler, FileCreatedEvent
 
 
+_FILE_WRITE_TIMEOUT = 5.0    # seconds to wait for a file to finish writing
+_FILE_POLL_INTERVAL = 0.2   # seconds between size stability checks
+
+
 class ScreenshotHandler(FileSystemEventHandler):
     """Handler for new screenshot files."""
-    
+
     VALID_EXTENSIONS = {'.png', '.jpg', '.jpeg', '.webp', '.bmp'}
     
     def __init__(self, callback: Callable[[Path], None], ignore_files: Set[Path] = None):
@@ -52,11 +56,11 @@ class ScreenshotHandler(FileSystemEventHandler):
         finally:
             self._processing.discard(filepath)
     
-    def _wait_for_file(self, filepath: Path, timeout: float = 5.0):
+    def _wait_for_file(self, filepath: Path, timeout: float = _FILE_WRITE_TIMEOUT):
         """Wait for file to be fully written."""
         start = time.time()
         last_size = -1
-        
+
         while time.time() - start < timeout:
             try:
                 current_size = filepath.stat().st_size
@@ -67,7 +71,7 @@ class ScreenshotHandler(FileSystemEventHandler):
                 last_size = current_size
             except (OSError, FileNotFoundError):
                 pass
-            time.sleep(0.2)
+            time.sleep(_FILE_POLL_INTERVAL)
 
 
 class ScreenshotMonitor:

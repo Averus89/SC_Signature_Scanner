@@ -91,10 +91,8 @@ def main():
         "config.py",
         "theme.py",
         "paths.py",
-        "pricing.py",
         "version_checker.py",
         "region_selector.py",
-        "regolith_api.py",
         "requirements.txt",
         "SC_Signature_Scanner.spec",
     ]

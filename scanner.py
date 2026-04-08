@@ -19,11 +19,7 @@ from typing import Callable, Dict, List, Any, Optional, Tuple
 from PIL import Image
 import numpy as np
 
-try:
-    import cv2
-    HAS_CV2 = True
-except ImportError:
-    HAS_CV2 = False
+import cv2
 
 import paths
 
@@ -45,6 +41,23 @@ try:
 except ImportError as e:
     EASYOCR_ERROR = str(e)
     print(f"Warning: EasyOCR not installed. OCR disabled. Error: {e}")
+
+# Signature validity range
+MIN_SIGNATURE = 100
+MAX_SIGNATURE = 200_000
+
+# OCR image processing
+MIN_OCR_DIMENSION = 64       # upscale threshold (pixels)
+MIN_COMPONENT_AREA = 50      # smallest blob kept — removes commas/periods
+MAX_COMPONENT_AREA_SMALL = 30  # threshold for 'small' component filter pass
+MAX_COMPONENT_AREA_LARGE = 100  # threshold for 'large' component filter pass
+
+# Signature matching
+MAX_CLUSTER_COUNT = 100      # sanity cap on rock count (value / base signature)
+
+# Image loading
+MAX_IMAGE_FILE_SIZE = 50 * 1024 * 1024  # 50 MB — guard against decompression bombs
+
 
 class SignatureScanner:
     """Scans screenshots for signature values using EasyOCR."""
@@ -295,10 +308,9 @@ class SignatureScanner:
             img = img.convert('RGB')
         
         # Upscale small regions for better detection
-        min_dimension = 64
         scale = 1
-        if img.width < min_dimension or img.height < min_dimension:
-            scale = max(min_dimension // min(img.width, img.height), 2)
+        if img.width < MIN_OCR_DIMENSION or img.height < MIN_OCR_DIMENSION:
+            scale = max(MIN_OCR_DIMENSION // min(img.width, img.height), 2)
             img = img.resize(
                 (img.width * scale, img.height * scale),
                 Image.Resampling.LANCZOS
@@ -312,7 +324,7 @@ class SignatureScanner:
         
         return img_array
     
-    def _remove_small_components(self, img_array: np.ndarray, min_area: int = 50) -> np.ndarray:
+    def _remove_small_components(self, img_array: np.ndarray, min_area: int = MIN_COMPONENT_AREA) -> np.ndarray:
         """Remove small connected components from image.
         
         Commas and periods are tiny (~5-20 pixels) compared to digits (100+ pixels).
@@ -571,8 +583,7 @@ class SignatureScanner:
         Returns:
             True if value could be a valid signature
         """
-        # Valid range: 100 (small ground deposit) to 200,000 (large salvage/asteroid field)
-        return 100 <= value <= 200000
+        return MIN_SIGNATURE <= value <= MAX_SIGNATURE
     
     def _is_exact_multiple(self, value: int) -> bool:
         """Check if value is an exact multiple of any known base signature.
@@ -586,7 +597,7 @@ class SignatureScanner:
         for base in self.known_base_signatures:
             if value % base == 0:
                 count = value // base
-                if 1 <= count <= 100:  # Reasonable count range
+                if 1 <= count <= MAX_CLUSTER_COUNT:
                     return True
         return False
     
@@ -775,5 +786,12 @@ class SignatureScanner:
             self.debug_dir = output_dir
     
     def _load_image(self, image_path: Path) -> Optional[Image.Image]:
-        """Load an image."""
-        return Image.open(image_path)
+        """Load an image, enforcing a file-size cap and releasing the file handle immediately."""
+        try:
+            if image_path.stat().st_size > MAX_IMAGE_FILE_SIZE:
+                return None
+            img = Image.open(image_path)
+            img.load()  # force full read into memory; closes the file handle
+            return img
+        except Exception:
+            return None

@@ -324,24 +324,6 @@ class RegolithTheme:
         )
         return sep
     
-    @classmethod
-    def create_card(cls, parent, **kwargs) -> tk.Frame:
-        """Create a card-style container."""
-        defaults = {
-            'bg': cls.COLORS['bg_light'],
-            'padx': 15,
-            'pady': 15
-        }
-        defaults.update(kwargs)
-        
-        # Outer frame for border effect
-        outer = tk.Frame(parent, bg=cls.COLORS['border'])
-        inner = tk.Frame(outer, **defaults)
-        inner.pack(fill=tk.BOTH, expand=True, padx=1, pady=1)
-        
-        return inner, outer
-
-
 # Banner widgets
 class WarningBanner(tk.Frame):
     """Stylized warning banner."""
@@ -407,8 +389,14 @@ class UpdateBanner(tk.Frame):
 
     def _open_download(self, event=None):
         """Open download URL in browser."""
+        import urllib.parse
         import webbrowser
-        webbrowser.open(self.download_url)
+        try:
+            parsed = urllib.parse.urlparse(self.download_url)
+            if parsed.scheme in ('https', 'http') and parsed.netloc.endswith('github.com'):
+                webbrowser.open(self.download_url)
+        except Exception:
+            pass
 
 
 # Status indicator
