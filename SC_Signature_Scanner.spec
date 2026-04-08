@@ -101,13 +101,16 @@ hiddenimports = [
 # Collect all torch and torchvision submodules
 from PyInstaller.utils.hooks import collect_submodules, collect_data_files
 
+hiddenimports += collect_submodules('PIL')
 hiddenimports += collect_submodules('torch')
 hiddenimports += collect_submodules('torchvision')
 hiddenimports += collect_submodules('easyocr')
 
 # Collect torch data files (e.g., CUDA libs if present)
+pil_datas = collect_data_files('PIL')
 torch_datas = collect_data_files('torch')
 torchvision_datas = collect_data_files('torchvision')
+datas += pil_datas
 datas += torch_datas
 datas += torchvision_datas
 

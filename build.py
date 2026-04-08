@@ -212,30 +212,47 @@ def main():
             print(f"    ✗ {e}")
         sys.exit(1)
 
+    # ===== Package ZIP =====
+    print_section("Packaging Release ZIP")
+
+    zip_name = f"SC_Signature_Scanner_v{version}.zip"
+    zip_path = project_dir / "dist" / zip_name
+
+    # Remove any previous zip with the same name
+    if zip_path.exists():
+        zip_path.unlink()
+        print(f"  Removed previous: {zip_name}")
+
+    import zipfile
+
+    with zipfile.ZipFile(zip_path, "w", zipfile.ZIP_DEFLATED, compresslevel=6) as zf:
+        for file in dist_dir.rglob("*"):
+            if file.is_file():
+                # Archive path: SC_Signature_Scanner/<relative path inside dist_dir>
+                arcname = Path("SC_Signature_Scanner") / file.relative_to(dist_dir)
+                zf.write(file, arcname)
+
+    zip_size_mb = zip_path.stat().st_size / (1024 * 1024)
+    print(f"  ✓ {zip_name} ({zip_size_mb:.1f} MB)")
+
     # ===== Summary =====
     print_header("BUILD COMPLETE")
 
     print(f"App version: v{version}")
     print(f"SC version:  {sc_version}")
     print(f"Python:      {sys.version.split()[0]}")
-    print(f"Output:      {dist_dir}")
-    print()
-    print("Bundled (in _internal/):")
-    print("  data/combat_analyst_db.json")
-    print()
-    print("Runtime files (created next to exe on first use):")
-    print("  config.json              — user settings")
-    print("  scan_region.json         — scan region config")
-    print("  SignatureScannerBugreport/ — debug screenshots")
+    print(f"Exe:         {exe_file.name} ({exe_file.stat().st_size / 1024 / 1024:.1f} MB)")
+    print(f"Release zip: {zip_name} ({zip_size_mb:.1f} MB)")
+    print(f"Output:      {project_dir / 'dist'}")
     print()
     print("Distribution:")
-    print("  Zip the entire SC_Signature_Scanner/ folder.")
-    print("  Users extract and run SC_Signature_Scanner.exe")
+    print(f"  Attach {zip_name} to the GitHub release.")
+    print("  Users extract the zip and run SC_Signature_Scanner.exe")
     print()
 
     # Open dist folder on Windows
     if sys.platform == "win32":
-        os.startfile(dist_dir)
+        os.startfile(project_dir / "dist")
 
 
 if __name__ == "__main__":

@@ -3,10 +3,19 @@
 A living journal that persists across compactions. Captures decisions, progress, and context.
 
 ## Current State
-- **Focus:** v4.2.1 released — awaiting user feedback
-- **Blocked:** nothing
+- **Focus:** v5.0.0 released as pre-release — awaiting real-world testing before promoting to full release
+- **Blocked:** nothing; Phase 9 (GitHub Pages) and fresh-install smoke test remain open
 
 ## Log
+
+### 2026-04-08 — Completed: v5.0.0 security hardening + quality pass released
+- Full red-team + code review + post-review pipeline completed
+- Security: URL validation (download_url), reparse point guards (screenshot/debug folders), 50 MB image cap
+- Crash fixes: added missing `import os`, `_test_screenshot` now runs OCR on background thread
+- Quality: extracted named constants, removed dead code (pricing.py, regolith_api.py, create_card, get_asset_path), overlay colors reference RegolithTheme.COLORS
+- Correctness: 4-tuple/3-tuple update check eliminated via `_update_check_error`, .webp/.bmp added to file enumeration
+- README rewritten; GitHub release v5.0.0 created (pre-release)
+- Open: exe smoke test, in-game verification, promote to full release, GitHub Pages (Phase 9)
 
 ### 2026-03-18 — Completed: v4.2.1 released to GitHub
 - Exe built (38.9 MB, PyInstaller 6.19), attached to GitHub release tag v4.2.1

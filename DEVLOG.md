@@ -3,7 +3,7 @@
 **Project:** SC Signature Scanner  
 **Location:** `C:\Users\larse\PycharmProjects\AREA52\SC_Signature_Scanner\`  
 **Developer:** Mallachi  
-**Current Version:** v5.0.0 — In progress
+**Current Version:** v5.0.0
 **Development Period:** January 8, 2026 - ongoing
 
 ---

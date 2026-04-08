@@ -112,11 +112,12 @@ Compare both reports. Identify:
 
 ### Phase 7 — Git & Release
 
-- [ ] Commit all changes with semantic message: `feat: v5.0.0 — security hardening and quality fixes`
-- [ ] Push to `origin/main`
-- [ ] Create GitHub Release `v5.0.0` via `gh release create`
-- [ ] Attach built `.exe` as release asset
-- [ ] Verify update checker in v4.2.1 installs will detect v5.0.0
+- [x] Commit all changes
+- [x] Push to `origin/master`
+- [x] GitHub Release v5.0.0 created with exe attached
+- [x] **v5.0.0 marked as pre-release** — awaiting real-world testing before promoting to full release
+- [ ] Test on fresh install / in-game workflow
+- [ ] Promote to full release once testing passes
 
 ---
 
@@ -142,7 +143,7 @@ Rewrite README to accurately reflect the current tool. Current README (if it exi
 
 ---
 
-## Application Version: 4.2.1
+## Application Version: 5.0.0
 ## Database Version: 4.7 (for Star Citizen 4.7)
 ## OCR Engine: EasyOCR (deep learning)
 
