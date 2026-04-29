@@ -1,0 +1,292 @@
+// Main app — radial nav + module switching + detection state
+const { useState, useEffect, useRef, useCallback } = React;
+
+const MODULES = [
+  { id: 'scanner',  label: 'SCANNER',  code: '01', glyph: '◉' },
+  { id: 'index',    label: 'INDEX',    code: '02', glyph: '≡', disabled: true },
+  { id: 'overlay',  label: 'HUD',      code: '03', glyph: '◇', disabled: true },
+  { id: 'region',   label: 'REGION',   code: '04', glyph: '⊞', disabled: true },
+  { id: 'settings', label: 'SETTINGS', code: '05', glyph: '⚙', disabled: true },
+];
+
+function useTime() {
+  const [t, setT] = useState(() => new Date());
+  useEffect(() => {
+    const i = setInterval(() => setT(new Date()), 1000);
+    return () => clearInterval(i);
+  }, []);
+  return t;
+}
+const fmtTime = (d) => d.toTimeString().slice(0, 8);
+
+function App() {
+  const [mod, setMod] = useState('scanner');
+  const [monitoring, setMonitoring] = useState(false);
+  const [detections, setDetections] = useState([]);
+  const [region, setRegion] = useState({ x: 2360, y: 358, w: 405, h: 158 });
+  const [screenshotFolder, setScreenshotFolder] = useState('');
+  const [codexFilter, setCodexFilter] = useState('all');
+  const [settings, setSettings] = useState({
+    popupX: 3344, popupY: 473, duration: 10, scale: 120, debug: false, sound: true,
+    debugFolder: 'C:\\Users\\sc\\AppData\\Local\\SC_Signature_Scanner\\debug',
+  });
+  const [bridgeReady, setBridgeReady] = useState(
+    typeof window !== 'undefined' && !!window.pywebview && !!window.pywebview.api
+  );
+
+  const latest = detections[detections.length - 1] || null;
+  const time = useTime();
+
+  // Wait for pywebview.api to be injected
+  useEffect(() => {
+    if (bridgeReady) return;
+    const onReady = () => setBridgeReady(true);
+    window.addEventListener('pywebviewready', onReady);
+    return () => window.removeEventListener('pywebviewready', onReady);
+  }, [bridgeReady]);
+
+  // Bootstrap initial state from Python
+  useEffect(() => {
+    if (!bridgeReady) return;
+    window.pywebview.api.get_initial_state().then(state => {
+      if (state && typeof state.screenshotFolder === 'string') {
+        setScreenshotFolder(state.screenshotFolder);
+      }
+    }).catch(err => console.error('get_initial_state failed', err));
+  }, [bridgeReady]);
+
+  const ingestSig = useCallback((sig, file, override) => {
+    const r = sig != null ? window.lookupSignature(sig) : null;
+    const entry = {
+      id: Date.now() + Math.random(),
+      time: fmtTime(new Date()),
+      sig: sig ?? 0,
+      file: file || `ScreenShot-${Date.now()}.jpg`,
+      match: r?.match || null,
+      collisions: r?.collisions || [],
+      ...(override || {}),
+    };
+    setDetections(d => [...d, entry].slice(-100));
+  }, []);
+
+  // Receive detections pushed from Python
+  useEffect(() => {
+    window.onDetection = (payload) => {
+      ingestSig(payload.sig, payload.file, {
+        time: payload.time || fmtTime(new Date()),
+        error: payload.error || null,
+        pythonMatches: payload.matches || [],
+      });
+    };
+    return () => { delete window.onDetection; };
+  }, [ingestSig]);
+
+  // Toggle monitoring through the bridge
+  const toggleMonitoring = useCallback(async () => {
+    if (!bridgeReady) return;
+    try {
+      if (monitoring) {
+        await window.pywebview.api.stop_monitoring();
+        setMonitoring(false);
+      } else {
+        const result = await window.pywebview.api.start_monitoring();
+        if (result && result.ok) {
+          setMonitoring(true);
+        } else {
+          alert(result?.error || 'Failed to start monitoring');
+        }
+      }
+    } catch (err) {
+      console.error('toggleMonitoring failed', err);
+    }
+  }, [bridgeReady, monitoring]);
+
+  const browseFolder = useCallback(async () => {
+    if (!bridgeReady) return;
+    try {
+      const picked = await window.pywebview.api.pick_screenshot_folder();
+      if (picked) setScreenshotFolder(picked);
+    } catch (err) {
+      console.error('pick_screenshot_folder failed', err);
+    }
+  }, [bridgeReady]);
+
+  const persistFolderEdit = useCallback((value) => {
+    setScreenshotFolder(value);
+    if (bridgeReady) {
+      window.pywebview.api.set_screenshot_folder(value).catch(err =>
+        console.error('set_screenshot_folder failed', err));
+    }
+  }, [bridgeReady]);
+
+  const simulateDetection = useCallback(() => {
+    if (!bridgeReady) return;
+    window.pywebview.api.test_detection().catch(err =>
+      console.error('test_detection failed', err));
+  }, [bridgeReady]);
+
+  return (
+    <div className="console-root">
+      <BackgroundFX />
+      <RivetBar className="top-bar">
+        <div className="brand-block pywebview-drag-region">
+          <div className="brand-lockup">
+            <span className="brand-mark">⛏</span>
+            <div>
+              <div className="brand-name">SIGNATURE SCANNER</div>
+              <div className="brand-sub">STAR CITIZEN · TARGET ID</div>
+            </div>
+          </div>
+        </div>
+        <div className="top-meta">
+          <Readout label="SYS" value="ONLINE" accent="var(--green)" glow />
+          <Readout label="UEE STD" value={fmtTime(time)} />
+          <Readout label="OCR" value="READY" accent="var(--green)" />
+          <Readout label="LATENCY" value="42ms" />
+          <WindowControls bridgeReady={bridgeReady} />
+        </div>
+      </RivetBar>
+
+      <div className="console-body">
+        <RadialNav mod={mod} setMod={setMod} />
+        <main className="module-stage">
+          {mod === 'scanner' && (
+            <ScannerPanel
+              detections={detections}
+              monitoring={monitoring}
+              toggleMonitoring={toggleMonitoring}
+              simulateDetection={simulateDetection}
+              screenshotFolder={screenshotFolder}
+              setScreenshotFolder={persistFolderEdit}
+              browseFolder={browseFolder}
+              bridgeReady={bridgeReady}
+              latest={latest}
+            />
+          )}
+          {mod === 'region' && <RegionPanel region={region} setRegion={setRegion} />}
+          {mod === 'settings' && <SettingsPanel settings={settings} setSettings={setSettings} />}
+          {mod === 'codex' && <CodexPanel filter={codexFilter} setFilter={setCodexFilter} />}
+          {mod === 'index' && <IndexPanel activeSig={latest?.sig} />}
+          {mod === 'overlay' && <OverlayPreview latest={latest} settings={settings} />}
+        </main>
+        <TelemetryRail latest={latest} monitoring={monitoring} detections={detections} />
+      </div>
+
+      <RivetBar className="bottom-bar">
+        <div className="ticker">
+          <span className="ticker-label">TICKER</span>
+          <div className="ticker-content">
+            <span>◆ Windowed/Borderless required for in-game overlay</span>
+            <span>◆ {detections.length} signatures processed this session</span>
+            <span>◆ Region {region ? 'LOCKED' : 'UNSET'}</span>
+            <span>◆ EasyOCR engine warm</span>
+            <span>◆ In memory of Regolith.Rocks — The Industrial Community</span>
+          </div>
+        </div>
+      </RivetBar>
+    </div>
+  );
+}
+
+function RadialNav({ mod, setMod }) {
+  return (
+    <nav className="radial-nav">
+      <div className="rn-frame">
+        <div className="rn-header">
+          <Stencil size="sm">MODULES</Stencil>
+        </div>
+        <div className="rn-list">
+          {MODULES.map(m => (
+            <button
+              key={m.id}
+              className={`rn-item ${mod === m.id ? 'active' : ''} ${m.disabled ? 'disabled' : ''}`}
+              onClick={() => !m.disabled && setMod(m.id)}
+              disabled={m.disabled}
+              title={m.disabled ? 'Coming in a later phase' : undefined}
+            >
+              <span className="rn-glyph">{m.glyph}</span>
+              <span className="rn-text">
+                <span className="rn-code">{m.code}</span>
+                <span className="rn-label">{m.label}</span>
+              </span>
+              <span className="rn-rail" />
+            </button>
+          ))}
+        </div>
+        <div className="rn-footer">
+          <div className="rn-rivets"><span /><span /><span /><span /></div>
+          <Stencil size="sm">v6.0.0</Stencil>
+        </div>
+      </div>
+    </nav>
+  );
+}
+
+function TelemetryRail({ latest, monitoring, detections }) {
+  // recent tier histogram
+  const counts = { legendary: 0, epic: 0, rare: 0, uncommon: 0, common: 0 };
+  detections.slice(-30).forEach(d => { if (d.match && counts[d.match.tier] != null) counts[d.match.tier]++; });
+  const max = Math.max(1, ...Object.values(counts));
+  return (
+    <aside className="telemetry-rail">
+      <Panel title="TELEMETRY" code="TLM" accent="var(--amber)" parallax={false}>
+        <div className="tlm-stack">
+          <LED state={monitoring ? 'green' : 'amber'} label={monitoring ? 'MONITORING' : 'STANDBY'} blink={monitoring} />
+          <LED state="green" label="OCR ENGINE" />
+          <LED state="green" label="OVERLAY" />
+          <LED state={latest?.match ? 'green' : 'amber'} label={latest?.match ? 'TARGET LOCK' : 'NO TARGET'} />
+        </div>
+        <div className="tlm-divider" />
+        <div className="tlm-section-title">TIER FREQUENCY · LAST 30</div>
+        <div className="tlm-hist">
+          {Object.entries(counts).map(([k, v]) => {
+            const t = window.TIERS[k];
+            return (
+              <div key={k} className="tlm-bar-row">
+                <span className="tlm-bar-label" style={{ color: t.color }}>{t.label}</span>
+                <span className="tlm-bar-track"><span className="tlm-bar-fill" style={{ width: `${(v/max)*100}%`, background: t.color }} /></span>
+                <span className="tlm-bar-count">{v}</span>
+              </div>
+            );
+          })}
+        </div>
+        <div className="tlm-divider" />
+        <div className="tlm-section-title">LAST READ</div>
+        {latest ? (
+          <div className="tlm-last">
+            <div className="tlm-last-sig">{latest.sig.toLocaleString()}</div>
+            <div className="tlm-last-name" style={{ color: window.TIERS[latest.match?.tier || 'unknown'].color }}>
+              {latest.match?.name || 'NO LOCK'}
+            </div>
+            <div className="tlm-last-time">{latest.time}</div>
+          </div>
+        ) : <div className="tlm-empty">— NO DATA —</div>}
+      </Panel>
+    </aside>
+  );
+}
+
+function BackgroundFX() {
+  return (
+    <div className="bg-fx" aria-hidden>
+      <div className="bg-stars" />
+      <div className="bg-vignette" />
+      <div className="bg-scanlines" />
+    </div>
+  );
+}
+
+function WindowControls({ bridgeReady }) {
+  const call = (name) => () => {
+    if (!bridgeReady || !window.pywebview?.api?.[name]) return;
+    window.pywebview.api[name]();
+  };
+  return (
+    <div className="win-controls">
+      <button className="win-btn" onClick={call('minimize_window')} title="Minimize" aria-label="Minimize">—</button>
+      <button className="win-btn close" onClick={call('close_window')} title="Close" aria-label="Close">×</button>
+    </div>
+  );
+}
+
+ReactDOM.createRoot(document.getElementById('root')).render(<App />);

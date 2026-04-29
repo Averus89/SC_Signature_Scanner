@@ -49,6 +49,43 @@ The devlog shall always contain a clear "Current Status" or "Next Steps" section
 
 ## Changelog
 
+### 2026-04-30 — v5.1.0.dev1: Webview UI migration · Phase 1 (scaffold + scanner)
+
+Branch `feat/webview-migration`. Migration from tkinter to a React desktop UI hosted in pywebview, executed in six vertical-slice phases. Phase 1 establishes the scaffold and ports the scanner panel only; tkinter `main.py` remains runnable in parallel.
+
+**Architecture decision — option B2 (full webview):**
+Reviewed three options before starting: (A) restyle tkinter as a design reference only, (B1) hybrid main-window-webview + keep-tkinter-overlay, (B2) full webview for main + overlay + region selector, (C) PyQt rewrite. Selected B2 because it lets Designer's full sci-fi console aesthetic land 1:1 from the JSX prototype. Trade-offs accepted: Microsoft Edge WebView2 becomes a runtime requirement (preinstalled on Win10/11); pywebview adds ~600 KB to the venv; some webview Windows quirks (transparency, click-through) deferred until phases 3–4.
+
+**Bundling — babel-standalone in the browser:**
+No Node toolchain, no build step. Future Designer JSX iterations drop in cleanly. ~1–2 s startup compile cost is masked by the existing tkinter splash. If types/source-maps/npm packages become important later, a Vite migration is mechanical.
+
+**Files added:**
+- `app_webview.py` — frameless 1020×800 entry. Tkinter splash → loads OCR/scanner/monitor → opens pywebview window pointing at `ui/main/index.html`.
+- `bridge.py` — `Bridge` class exposed via pywebview `js_api`. Public surface: `get_initial_state`, `pick_screenshot_folder`, `set_screenshot_folder`, `start_monitoring`, `stop_monitoring`, `test_detection`, `minimize_window`, `maximize_window`, `close_window`. Private setup `_attach_window()`. Detection events pushed to JS via `window.evaluate_js("window.onDetection(...)")`.
+- `ui/main/` — Designer's React 18 + babel-standalone JSX moved out of `Project Rockfinder/`. The latter retains only the design-archive screenshots in `ref/` and `_check/`.
+
+**Files modified:**
+- `requirements.txt` — added `pywebview>=6.2.0`.
+- `version_checker.py` — `CURRENT_VERSION` bumped `5.0.0` → `5.1.0.dev1`.
+- `ui/main/app.jsx` — TWEAK_DEFAULTS / `useTweaks` / `TweaksUI` removed; non-scanner radial nav buttons (`INDEX`, `HUD`, `REGION`, `SETTINGS`) gated with `disabled: true` and a "Coming in a later phase" tooltip; bridge-ready hook + bootstrap state from `get_initial_state`; `window.onDetection` receives Python pushes; folder browse + monitoring + ping all routed through `pywebview.api.*`; `WindowControls` component (—, ×) calling `bridge.minimize_window` / `bridge.close_window`; `pywebview-drag-region` class on `brand-block`.
+- `ui/main/scanner-panel.jsx` — props renamed to `toggleMonitoring`, `browseFolder`, `bridgeReady`; buttons gain `disabled={!bridgeReady}` until JS bridge is up.
+- `ui/main/styles.css` — removed `body::before` vignette overlay (z-index 2 over content was washing the UI to <100% opacity); added `.pywebview-drag-region` (cursor grab/grabbing), `.win-controls`, `.win-btn` / `.win-btn.close`, and `.rn-item.disabled` styling.
+- `ui/main/index.html` — dropped `tweaks-panel.jsx` script tag; cache buster `v=16` → `v=17`.
+
+**Files dropped:** `tweaks-panel.jsx` (Designer-only debug controls).
+
+**Verified manually:**
+Splash → console handoff; brand-area drag works; min/× window controls work; BROWSE opens native folder picker and persists to `config.json`; ENGAGE without folder yields error popup; with valid folder switches to MONITORING; dropping a real Star Citizen screenshot into the watched folder produces a live detection log entry; PING opens file dialog and runs OCR against the chosen screenshot; HALT returns to STANDBY; window resizes cleanly down to the `min_size=(960, 700)` floor.
+
+**Known limitations of phase 1:**
+- Match names/tiers in the React UI come from the JS-side mock `data.jsx`, not the real Python signature DB. Ship-mining minerals match correctly because their signatures align; ground deposits (count × base_signature) and salvage debris show "NO LOCK" in the reveal card even when Python correctly identified them. Phase 5 wires the real DB into JS.
+- `INDEX`, `HUD`, `REGION`, `SETTINGS` panels exist in the JSX but are gated off the radial nav.
+- No live OCR confidence / debug folder display in the React UI yet.
+
+**Remaining migration phases:** 2 — Settings panel · 3 — Overlay window · 4 — Region selector · 5 — Index/codex panel · 6 — Packaging (remove tkinter `main.py`, update `.spec`).
+
+---
+
 ### 2026-04-08 — v5.0.0: Security hardening and quality pass
 
 Full red-team + code review + post-review pipeline. All findings addressed.

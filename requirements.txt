@@ -21,3 +21,8 @@ opencv-python>=4.8.0
 # ===== File Monitoring =====
 watchdog>=3.0.0
 
+# ===== UI =====
+# pywebview - desktop window hosting the React UI in ui/main/
+# Uses Microsoft Edge WebView2 on Windows (preinstalled on Win10/11).
+pywebview>=6.2.0
+

@@ -3,10 +3,20 @@
 A living journal that persists across compactions. Captures decisions, progress, and context.
 
 ## Current State
-- **Focus:** v5.0.0 released as pre-release — awaiting real-world testing before promoting to full release
-- **Blocked:** nothing; Phase 9 (GitHub Pages) and fresh-install smoke test remain open
+- **Focus:** webview UI migration on branch `feat/webview-migration`. Phase 1 done; tkinter `main.py` still parallel until full migration completes.
+- **Blocked:** nothing; Phase 1 verified, awaiting decision to commit and start Phase 2 (Settings panel).
 
 ## Log
+
+### 2026-04-30 — Completed: Phase 1 of webview UI migration
+- New branch `feat/webview-migration` from master.
+- Decision: option B2 from architecture discussion — both main UI and (later) overlay become webview windows. Babel-standalone (no build step), keep tkinter splash, drop Designer's tweaks panel.
+- Designer's "Project Rockfinder" JSX moved to `ui/main/`; tweaks-panel.jsx dropped; `pywebview-drag-region` added to brand-block; window controls (—, ×) added; non-scanner radial nav buttons disabled.
+- New: `app_webview.py` (frameless 1020×800 entry), `bridge.py` (`Bridge` js_api class — get_initial_state, pick_screenshot_folder, set_screenshot_folder, start/stop_monitoring, test_detection, minimize/close_window). Detections pushed to JS via `window.evaluate_js("window.onDetection(...)")`.
+- Removed `body::before` vignette in styles.css (was overlaying content at z-index 2 → washed-out look).
+- pywebview 6.2.1 added to requirements.txt; uses WebView2 on Windows.
+- Verified: splash → console handoff, BROWSE picker, ENGAGE/HALT, PING, real screenshot drop into watched folder updates the React log live.
+- Known: ground-deposit / salvage matches show "NO LOCK" in the reveal card because JS-side `lookupSignature` uses mock data.jsx; phase 5 wires the real Python DB.
 
 ### 2026-04-08 — Completed: v5.0.0 security hardening + quality pass released
 - Full red-team + code review + post-review pipeline completed

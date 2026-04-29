@@ -2,6 +2,59 @@
 
 ---
 
+## Active: v6.0.0 — Webview UI Migration (branch `feat/webview-migration`)
+
+Replacing the tkinter UI with a React console hosted in pywebview, in six vertical-slice phases. Each phase is shippable on its own; tkinter `main.py` remains runnable in parallel until phase 6.
+
+### Migration Phase 1 — Scaffold + Scanner Panel ✓ COMPLETE
+- [x] Add `pywebview` to `requirements.txt`; install in venv
+- [x] Move Designer's `Project Rockfinder/*.jsx` + `styles.css` + `index.html` to `ui/main/`; drop `tweaks-panel.jsx`
+- [x] Strip tweaks UI from `app.jsx`; gate non-scanner radial nav buttons
+- [x] `bridge.py` — `js_api` for scanner panel (folder picker, start/stop monitoring, test detection)
+- [x] `app_webview.py` — splash → pywebview window entry point
+- [x] Wire scanner panel JSX to bridge; expose `window.onDetection` for Python pushes
+- [x] Frameless window + drag region + min/close controls
+- [x] Remove `body::before` vignette (was washing content)
+- [x] Manual verification: splash, drag, BROWSE, ENGAGE, HALT, PING, real screenshot detection
+- [x] Version bump → `5.1.0.dev1`
+
+### Migration Phase 2 — Settings Panel
+- [ ] Bridge methods: `get_settings`, `save_settings`, `pick_overlay_position`, `pick_debug_folder`, `toggle_debug`
+- [ ] Persist to existing `config.json` schema (compatibility with current tkinter app)
+- [ ] Wire `<SettingsPanel>` JSX to bridge
+- [ ] Enable `SETTINGS` radial nav button
+
+### Migration Phase 3 — Overlay Window
+- [ ] Second `webview.create_window()` for the in-game overlay popup
+- [ ] Frameless, topmost, transparent, positioned at saved `(x, y)`
+- [ ] `ui/overlay/` JSX subfolder with mineral-tier-aware match render
+- [ ] Auto-hide after `duration` seconds
+- [ ] Replace `overlay.py` (`OverlayPopup`, `PositionAdjuster`)
+- [ ] Enable `HUD` radial nav button (live overlay preview)
+
+### Migration Phase 4 — Region Selector
+- [ ] Fullscreen frameless transparent webview for drag-rect picking
+- [ ] Bridge: `start_region_selector()`, `save_region(rect)`
+- [ ] Replace `region_selector.py`
+- [ ] Enable `REGION` radial nav button
+
+### Migration Phase 5 — Index / Codex Panel
+- [ ] Bridge: `get_signature_index()` returning the real Python DB grouped by tier
+- [ ] Replace `data.jsx` mock with bridge-fetched data
+- [ ] Live highlight of the latest scanned signature in the index
+- [ ] Enable `INDEX` radial nav button
+- [ ] Drop the JS-side `lookupSignature` mock — match payloads come from Python
+
+### Migration Phase 6 — Packaging + tkinter Removal
+- [ ] Update `SC_Signature_Scanner.spec` for pywebview + `ui/` assets bundling
+- [ ] WebView2 runtime detection with graceful fallback message
+- [ ] Verify exe on a clean Win10/11 machine
+- [ ] Delete `main.py`, `overlay.py`, `region_selector.py`, `theme.py`, `splash.py` (replace splash with webview splash if Designer delivers one)
+- [ ] Bump version `5.1.0.devN` → `6.0.0`
+- [ ] Update `README.md` for the new architecture and runtime requirement
+
+---
+
 ## Planned: Full Security & Quality Pass → v5.0.0 Release
 
 Same pipeline as ShaderCacheNuke v3.0.0. Work through each phase in order.
