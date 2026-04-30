@@ -99,7 +99,14 @@ function RevealCard({ latest, tweak }) {
             <span className="reveal-tier-chip" style={{ background: t.color }}>{t.label}</span>
             <span className="reveal-cat">{m?.cat?.toUpperCase() || 'UNKNOWN'} · MINING</span>
           </div>
-          <div className="reveal-name">{m?.name || 'NO LOCK'}</div>
+          <div className="reveal-name">
+            {m
+              ? <>
+                  <span>{m.nameMain || m.name}</span>
+                  {m.nameSubtitle && <span className="reveal-name-sub">{m.nameSubtitle}</span>}
+                </>
+              : 'NO LOCK'}
+          </div>
           <div className="reveal-sig-block">
             <div className="reveal-sig-label">SIGNATURE READ</div>
             <div className="reveal-sig-value">{latest.sig.toLocaleString()}</div>

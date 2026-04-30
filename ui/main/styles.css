@@ -622,6 +622,11 @@ html, body { display: flex; align-items: center; justify-content: center; }
   line-height: 1;
   text-shadow: 0 0 20px var(--tier, var(--amber-trans));
 }
+.reveal-name-sub {
+  font-size: 70%;
+  margin-left: 0.4em;
+  opacity: 0.85;
+}
 .no-match .reveal-name { color: var(--red); }
 .reveal-sig-block {
   display: flex; flex-direction: column; gap: 2px;

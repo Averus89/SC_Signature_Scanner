@@ -13,6 +13,7 @@ and placement-mode toggles via `window.onPlacementMode(...)`.
 from __future__ import annotations
 
 import json
+import re
 import threading
 from datetime import datetime
 from pathlib import Path
@@ -60,7 +61,7 @@ class Bridge:
         return {
             "screenshotFolder": cfg.get("screenshot_folder", ""),
             "monitoring": False,
-            "version": "5.1.0.dev4",
+            "version": "5.1.0.dev5",
         }
 
     # ---- Folder picker ------------------------------------------------------
@@ -245,6 +246,136 @@ class Bridge:
             daemon=True,
         ).start()
         return {"ok": True}
+
+    # ---- Signature database -------------------------------------------------
+
+    def get_signature_db(self) -> dict[str, list[dict[str, Any]]]:
+        """Return the loaded signature DB shaped for the React UI.
+
+        Replaces the hardcoded JS tables in `data.jsx` so codex/index lookups
+        and the reveal card's match/tier all use Python's source of truth.
+        """
+        scanner = self.scanner
+        if scanner is None:
+            return {"minerals": [], "ground": [], "salvage": []}
+
+        minerals: list[dict[str, Any]] = []
+        for sig, info in getattr(scanner, "minable_signatures", {}).items():
+            minerals.append({
+                "sig": int(sig),
+                "name": info.get("mineral", info.get("name", "")),
+                "tier": info.get("tier", "unknown"),
+                "cat": "ship",
+                "notes": "",
+            })
+
+        ground: list[dict[str, Any]] = []
+        small_base = int(getattr(scanner, "ground_deposit_small_base", 0) or 0)
+        large_base = int(getattr(scanner, "ground_deposit_large_base", 0) or 0)
+        if small_base > 0:
+            ground.append({
+                "sig": small_base,
+                "name": "Small Ground Deposit",
+                "tier": "ground_s",
+                "cat": "ground",
+                "notes": "FPS / Hand mining",
+            })
+        if large_base > 0:
+            ground.append({
+                "sig": large_base,
+                "name": "Large Ground Deposit",
+                "tier": "ground_l",
+                "cat": "ground",
+                "notes": "ROC / Vehicle mining",
+            })
+
+        salvage: list[dict[str, Any]] = []
+        per_panel = int(getattr(scanner, "salvage_per_panel", 0) or 0)
+        if per_panel > 0:
+            salvage.append({
+                "sig": per_panel,
+                "name": "Salvage Panel",
+                "tier": "salvage",
+                "cat": "salvage",
+                "notes": "Per-panel base — multiples of this signal hull scrap",
+            })
+        for base_sig, debris_name in getattr(scanner, "salvage_debris_types", []):
+            if int(base_sig) <= 0:
+                continue
+            salvage.append({
+                "sig": int(base_sig),
+                "name": debris_name,
+                "tier": "salvage",
+                "cat": "salvage",
+                "notes": "Wreck debris base",
+            })
+
+        return {"minerals": minerals, "ground": ground, "salvage": salvage}
+
+    # Strips a "(N×)" or "(Nx)" count suffix from scanner-side match names so
+    # the bridge can rebuild them in "Name ×N" form.
+    _COUNT_SUFFIX_RE = re.compile(r"\s*\(\d+[x×]\)\s*$")
+
+    @staticmethod
+    def _to_display_match(py_match: dict[str, Any]) -> dict[str, Any]:
+        """Translate a scanner match dict into the React-side match shape."""
+        category = py_match.get("category", "")
+        tier = py_match.get("tier") or ""
+        if not tier:
+            if category in ("salvage", "salvage_debris"):
+                tier = "salvage"
+            elif category == "ground_deposits":
+                variant = py_match.get("variant")
+                tier = "ground_s" if variant == "small" else "ground_l" if variant == "large" else "unknown"
+            else:
+                tier = "unknown"
+
+        if category == "ship_mining":
+            cat = "ship"
+        elif category in ("salvage", "salvage_debris"):
+            cat = "salvage"
+        elif category == "ground_deposits":
+            cat = "ground"
+        else:
+            cat = ""
+
+        # Build the display name. Goal: count-based matches all read
+        # "{Base name} ×N", with ship_mining additionally surfacing a tier
+        # subtitle the reveal card can render at a smaller size.
+        #   ship_mining  → nameMain="Torite ×3" + nameSubtitle="(Uncommon)"
+        #   salvage      → nameMain="Large Wreck Debris ×3", no subtitle
+        #   ground       → nameMain="Small Ground Deposit ×3", no subtitle
+        # `name` keeps the full single-line string for log/telemetry/overlay.
+        full_name = py_match.get("name", "")
+        name_main = full_name
+        name_subtitle = ""
+        count = int(py_match.get("count") or py_match.get("panels") or 1)
+
+        if category == "ship_mining":
+            mineral = py_match.get("mineral") or ""
+            tier_raw = py_match.get("tier") or ""
+            if mineral and tier_raw:
+                count_part = f" ×{count}" if count > 1 else ""
+                name_main = f"{mineral}{count_part}"
+                name_subtitle = f"({tier_raw.capitalize()})"
+                full_name = f"{name_main} {name_subtitle}".strip()
+        elif category in ("salvage", "salvage_debris", "ground_deposits"):
+            base_name = Bridge._COUNT_SUFFIX_RE.sub("", full_name)
+            if count > 1:
+                name_main = f"{base_name} ×{count}"
+            else:
+                name_main = base_name
+            full_name = name_main
+
+        return {
+            "name": full_name,
+            "nameMain": name_main,
+            "nameSubtitle": name_subtitle,
+            "tier": tier,
+            "cat": cat,
+            "notes": py_match.get("mining_method") or "",
+            "sig": int(py_match.get("signature") or 0),
+        }
 
     # ---- Scan region --------------------------------------------------------
 
@@ -459,12 +590,15 @@ class Bridge:
                 "matches": [],
                 "error": result["error"],
             }
+        raw_matches = result.get("matches", []) or []
+        display_matches = [Bridge._to_display_match(m) for m in raw_matches]
         return {
             "time": ts,
             "file": filepath.name,
             "sig": result.get("signature"),
             "allSignatures": result.get("all_signatures", []),
-            "matches": result.get("matches", []),
+            "matches": display_matches,
+            "rawMatches": raw_matches,
             "method": result.get("method"),
             "ocrConfidence": result.get("ocr_confidence"),
             "error": None,
@@ -481,7 +615,7 @@ class Bridge:
             "match": {
                 "tier": first.get("tier", "unknown"),
                 "name": first.get("name", ""),
-                "cat": first.get("category", first.get("cat", "")),
+                "cat": first.get("cat", ""),
                 "notes": first.get("notes", ""),
             },
         }

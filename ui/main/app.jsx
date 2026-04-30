@@ -53,24 +53,46 @@ function App() {
       window.pywebview.api.get_initial_state(),
       window.pywebview.api.get_settings(),
       window.pywebview.api.get_scan_region(),
-    ]).then(([state, sets, reg]) => {
+      window.pywebview.api.get_signature_db(),
+    ]).then(([state, sets, reg, db]) => {
       if (state && typeof state.screenshotFolder === 'string') {
         setScreenshotFolder(state.screenshotFolder);
       }
       if (sets) setSettings(sets);
       if (reg) setRegion(reg);
+      if (db) {
+        window.MINERALS = db.minerals || [];
+        window.GROUND = db.ground || [];
+        window.SALVAGE = db.salvage || [];
+        window.ALL_SIGNATURES = [...window.MINERALS, ...window.GROUND, ...window.SALVAGE]
+          .sort((a, b) => a.sig - b.sig);
+      }
     }).catch(err => console.error('bootstrap failed', err));
   }, [bridgeReady]);
 
   const ingestSig = useCallback((sig, file, override) => {
-    const r = sig != null ? window.lookupSignature(sig) : null;
+    // Prefer Python-side matches when present (they understand count
+    // multiples, salvage panels, debris bases). Fall back to the JS-side
+    // codex lookup only when Python returned nothing.
+    const pyMatches = override?.pythonMatches;
+    let match = null;
+    let collisions = [];
+    if (pyMatches && pyMatches.length > 0) {
+      match = pyMatches[0];
+      collisions = pyMatches.slice(1);
+    } else if (sig != null) {
+      const r = window.lookupSignature(sig);
+      match = r?.match || null;
+      collisions = r?.collisions || [];
+    }
+
     const entry = {
       id: Date.now() + Math.random(),
       time: fmtTime(new Date()),
       sig: sig ?? 0,
       file: file || `ScreenShot-${Date.now()}.jpg`,
-      match: r?.match || null,
-      collisions: r?.collisions || [],
+      match,
+      collisions,
       ...(override || {}),
     };
     setDetections(d => [...d, entry].slice(-100));

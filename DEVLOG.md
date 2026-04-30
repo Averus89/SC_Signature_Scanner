@@ -49,6 +49,32 @@ The devlog shall always contain a clear "Current Status" or "Next Steps" section
 
 ## Changelog
 
+### 2026-04-30 — v5.1.0.dev5: Webview UI migration · Phase 5 (real signature DB)
+
+Branch `feat/webview-migration`. The React UI now uses Python's signature database as the single source of truth. Phase 1 left `ui/main/data.jsx` as a hardcoded JS mock containing only ship-mining minerals — ground deposits and salvage debris fell through to `NO LOCK` in the reveal card even though `scanner.match_signature` was correctly identifying them. Phase 5 wires the real DB into the React layer.
+
+**Architecture decision — option B-full (hydrate JS tables from Python + prefer Python's matches per detection):**
+The bridge now exposes `get_signature_db()` returning `{minerals, ground, salvage}` shaped to mirror the codex display contract, populated from the live `SignatureScanner` instance. On bootstrap, app.jsx hydrates `window.MINERALS / GROUND / SALVAGE / ALL_SIGNATURES` from that response. Per-detection: `_build_detection_payload` runs every match through `_to_display_match` so `payload.matches` is already React-shaped (`{name, tier, cat, notes}`); `app.jsx::ingestSig` uses `payload.matches[0]` when present, falling back to `lookupSignature` only when Python returned nothing. The fallback path matters because `lookupSignature` is naive flat-tolerance — it can't recognize signatures like `count × base` (ground deposits, salvage debris). Python's `match_signature` does the modulo math and surfaces correct matches; React just renders.
+
+**Files modified:**
+- `bridge.py` — new method `get_signature_db()` builds React-shaped tables from `scanner.minable_signatures` / `ground_deposit_*_base` / `salvage_per_panel` / `salvage_debris_types`. New static `_to_display_match(py_match)` translates Python match dicts (`{type, category, name, tier, variant, ...}`) to React match dicts (`{name, tier, cat, notes}`). `_build_detection_payload` now exposes `matches` (display-shaped) and `rawMatches` (Python-shaped, kept in case the UI grows uses for confidence/count). `_build_overlay_payload` simplified — `matches[0]` is already display-shaped.
+- `ui/main/data.jsx` — hardcoded `MINERALS`/`GROUND`/`SALVAGE`/`ALL_SIGNATURES`/`SAMPLE_STREAM` arrays removed. Only `TIERS` (presentational metadata) and `lookupSignature` (fallback) remain. `lookupSignature` now reads `window.ALL_SIGNATURES` (hydrated by app.jsx on bootstrap) instead of a closed-over constant.
+- `ui/main/app.jsx` — bootstrap `Promise.all` extended with `get_signature_db()` and the four `window.*` globals are populated. `ingestSig` rewritten to prefer `pythonMatches[0]` over `lookupSignature`. Match shape unchanged downstream.
+- `ui/main/index.html` — cache busters `v=21` → `v=22`.
+- `version_checker.py` — `5.1.0.dev4` → `5.1.0.dev5`.
+
+**Verified manually:** Tested with sig 11700 (Torite ×3) and sig 7200 (Large Wreck Debris ×3) — both resolve correctly, the overlay popup shows the right tier color and name, the reveal card and telemetry rail update in sync. Three follow-up fixes landed during verification:
+
+1. **Black-screen-on-PING crash** — `RevealCard` was reading `m.sig.toLocaleString()` for the EXPECTED readout. Old data.jsx mock matches had `sig`; new bridge display matches did not. Fixed by adding `sig` (the matched signature) to `_to_display_match`. React's root unmounts on uncaught render errors → entire app went black.
+2. **Defensive globals init** — `data.jsx` now seeds `window.MINERALS/GROUND/SALVAGE/ALL_SIGNATURES` to `[]` synchronously, so any consumer reading them at first render (before bootstrap hydrates) gets an iterable empty array instead of `undefined`. Belt-and-braces against future regressions.
+3. **Display-name format** — ship mineral names changed from `"Torite (Uncommon) ×3"` to `"Torite ×3 (Uncommon)"` so the count sits before the tier qualifier; `nameMain` ("Torite ×3") and `nameSubtitle` ("(Uncommon)") are surfaced separately so the reveal card can render the subtitle at 70% font-size. Salvage debris and ground deposits got the same `Name ×N` treatment (was `Name (N×)`/`Name (Nx)`) for consistency. New CSS class `.reveal-name-sub`.
+
+**Out of scope (deferred):**
+- Surface confidence/count from `rawMatches` in the reveal card UI.
+- Phase 6 — packaging cleanup. Removes `main.py`, `region_selector.py` (after Phase 4's reuse window closes), `theme.py`, `overlay.py` (legacy tk overlay class). Updates `.spec` for PyInstaller.
+
+---
+
 ### 2026-04-30 — v5.1.0.dev4: Webview UI migration · Phase 4 (region selector)
 
 Branch `feat/webview-migration`. The OCR scan region picker is now reachable from the React `REGION` panel; the panel itself is enabled in the radial nav. The picker still uses the existing tk-based `RegionSelector` (load screenshot → drag rectangle → save) — this was a deliberate plan-B decision to reuse the tested image+canvas UX rather than reimplement it in JS. Phase 6 will retire `region_selector.py` along with `main.py`.

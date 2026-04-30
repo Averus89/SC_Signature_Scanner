@@ -3,11 +3,36 @@
 A living journal that persists across compactions. Captures decisions, progress, and context.
 
 ## Current State
-- **Focus:** webview UI migration on branch `feat/webview-migration`. Phases 1–4 verified. Phase 4 ready to commit.
-- **Blocked:** nothing. PICK REGION → file dialog (main visible) → screenshot picked → main minimizes → fullscreen tk region selector → Save/Cancel → main restores. User confirmed working.
-- **Pickup for next session:** Phase 5 — wire the real Python signature DB into the React UI so ground deposits / salvage / collisions match correctly. Phase 1 known limitation: `ui/main/data.jsx` is a JS-side mock that misses ground/salvage. Bridge already returns `matches` from `scanner.scan_image`; React just needs to use those instead of (or alongside) `lookupSignature` from data.jsx.
+- **Focus:** webview UI migration on branch `feat/webview-migration`. Phases 1–4 committed. Phase 5 verified (Torite ×3, Large Wreck Debris ×3 both resolve correctly), in tree, ready to commit.
+- **Blocked:** nothing.
+- **Pickup for next session:** Phase 6 — packaging cleanup. Drop `main.py`, `theme.py`, `overlay.py`, `region_selector.py` (after confirming nothing else imports it), update PyInstaller `.spec` to point at `app_webview.py` and bundle `ui/main/` + `ui/overlay/`.
 
 ## Log
+
+### 2026-04-30 — Completed: Phase 5 verification + display fixes
+- Black-screen-on-PING root cause: `RevealCard` line 108 read `m.sig.toLocaleString()` but the new display match shape lacked `sig`. Fixed by adding `sig` (matched-target signature) to `_to_display_match`.
+- Defensive `window.MINERALS/GROUND/SALVAGE/ALL_SIGNATURES = []` init in `data.jsx` so synchronous render-time reads can't crash before bootstrap hydrates.
+- Display-name reformat: ship_mining `"Torite (Uncommon) ×3"` → `"Torite ×3 (Uncommon)"`. Surfaced as `nameMain`+`nameSubtitle` so the reveal card renders the tier qualifier at 70% font (new `.reveal-name-sub` class). Salvage debris + ground + salvage panels now use `Name ×N` consistently (was `Name (N×)` / `Name (Nx)`); regex `_COUNT_SUFFIX_RE` strips the legacy suffix.
+- Verified: Torite ×3 (sig 11700, ship_mining), Large Wreck Debris ×3 (sig 7200, salvage_debris) both resolve correctly with right tier color in reveal card + overlay.
+
+### 2026-04-30 — Completed: Phase 5 of webview UI migration (real signature DB)
+- Architecture: B-full — hydrate JS tables from Python on bootstrap AND prefer Python's per-detection matches when present (with JS lookupSignature as fallback). Single source of truth = `SignatureScanner` in Python; React just renders.
+- `bridge.py`: new `get_signature_db()` returns `{minerals, ground, salvage}` from `scanner.minable_signatures`, `ground_deposit_*_base`, `salvage_per_panel`, `salvage_debris_types`. New static `_to_display_match(py_match)` translates Python match dicts → React shape `{name, tier, cat, notes}`. `_build_detection_payload` now exposes display-shaped `matches` plus raw `rawMatches`.
+- `ui/main/data.jsx`: gutted — hardcoded MINERALS/GROUND/SALVAGE/ALL_SIGNATURES/SAMPLE_STREAM arrays removed. TIERS (presentation metadata) + lookupSignature (fallback) remain. lookupSignature reads `window.ALL_SIGNATURES` at call time.
+- `ui/main/app.jsx`: bootstrap fetches `get_signature_db()` and hydrates `window.MINERALS/GROUND/SALVAGE/ALL_SIGNATURES`. `ingestSig` rewritten to prefer `pythonMatches[0]` over `lookupSignature`.
+- Version `5.1.0.dev4` → `5.1.0.dev5`. Cache buster `v=21` → `v=22`. DEVLOG updated. NOT yet committed.
+
+### 2026-04-30 — Context: Phase 5 verification checklist (next session)
+1. Launch `python app_webview.py`. Codex panel (currently disabled in nav) eventually wakes — but on bootstrap, `window.ALL_SIGNATURES` should be populated from Python. Sanity: open DevTools and check `window.MINERALS.length > 0`.
+2. PING a screenshot of a ship-mining target (e.g., a Borase/Bexalite signature ~3570) — should match correctly with `RARE` tier and the right mineral name. Same as before.
+3. PING a screenshot of a small ground deposit (signature ~3000 or a multiple like 6000/9000). The reveal card should show "Small Ground Deposit (Nx)" with tier `ground_s` (orange). This was the Phase 1 NO LOCK case.
+4. PING a screenshot of salvage debris. Should resolve to the right debris-type name with `SALVAGE` tier.
+5. Live monitoring: drop a real screenshot in the watched folder — same checks as PING but pushed via `onDetection`.
+6. Overlay window: real-screenshot detections should also pop the overlay card with the correct tier color and name.
+
+Known caveats to watch for:
+- If `lookupSignature` ever fires for a signature that should be Python-matched, the fallback's flat-tolerance match might pick up a near-miss ship mineral when the truth is a ground deposit. Won't normally happen because the bridge always sends `matches`. But worth noting.
+- Tier `ground_s` / `ground_l` colors are both amber-ish per `data.jsx::TIERS`. Visually similar to ship-mining "common". If hard to tell apart in the reveal card, may want distinct colors later.
 
 ### 2026-04-30 — Completed: Phase 4 verification + UX fixes
 - User confirmed PICK REGION + tk modal flow works perfectly after two follow-up fixes:
