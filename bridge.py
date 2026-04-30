@@ -1,12 +1,13 @@
 #!/usr/bin/env python3
 """
-Bridge between the React UI (ui/main/) and the Python core.
+Bridge between the React UIs (ui/main, ui/overlay) and the Python core.
 
 Public methods on Bridge are exposed to JavaScript as `pywebview.api.<name>`.
 Methods prefixed with `_` are private and NOT exposed.
 
-Slow operations (OCR scans) run on background threads and push results to JS
-via `window.<callback>(payload)` using pywebview's evaluate_js.
+The main window receives detection log entries via `window.onDetection(...)`.
+The overlay window receives match cards via `window.onOverlayDetection(...)`
+and placement-mode toggles via `window.onPlacementMode(...)`.
 """
 
 from __future__ import annotations
@@ -34,13 +35,21 @@ class Bridge:
         self.scanner = scanner
         self.config = config
         self.monitor: Optional[ScreenshotMonitor] = None
-        self._window: Optional[webview.Window] = None
+        self._main_window: Optional[webview.Window] = None
+        self._overlay_window: Optional[webview.Window] = None
+        self._overlay_hide_timer: Optional[threading.Timer] = None
+        self._overlay_prev_pos: Optional[tuple[int, int]] = None
 
     # ---- Private setup (not exposed to JS) ---------------------------------
 
-    def _attach_window(self, window: webview.Window) -> None:
-        """Store the webview window reference once it has been created."""
-        self._window = window
+    def _attach_windows(
+        self,
+        main: webview.Window,
+        overlay: webview.Window,
+    ) -> None:
+        """Store references to both pywebview windows once they exist."""
+        self._main_window = main
+        self._overlay_window = overlay
 
     # ---- Initial state ------------------------------------------------------
 
@@ -50,16 +59,16 @@ class Bridge:
         return {
             "screenshotFolder": cfg.get("screenshot_folder", ""),
             "monitoring": False,
-            "version": "5.0.0-webview",
+            "version": "5.1.0.dev3",
         }
 
     # ---- Folder picker ------------------------------------------------------
 
     def pick_screenshot_folder(self) -> Optional[str]:
         """Open the native folder dialog. Returns the selected path or None."""
-        if not self._window:
+        if not self._main_window:
             return None
-        result = self._window.create_file_dialog(webview.FOLDER_DIALOG)
+        result = self._main_window.create_file_dialog(webview.FOLDER_DIALOG)
         if not result:
             return None
         path = result[0] if isinstance(result, (list, tuple)) else result
@@ -85,25 +94,44 @@ class Bridge:
         """Return current settings translated for the React UI."""
         cfg = self.config.load() or {}
         return {
-            "popupX": int(cfg.get("popup_position_x", self._SETTINGS_DEFAULTS["popup_position_x"])),
-            "popupY": int(cfg.get("popup_position_y", self._SETTINGS_DEFAULTS["popup_position_y"])),
-            "duration": int(cfg.get("popup_duration", self._SETTINGS_DEFAULTS["popup_duration"])),
-            "scale": int(round(float(cfg.get("popup_scale", self._SETTINGS_DEFAULTS["popup_scale"])) * 100)),
+            "popupX": int(
+                cfg.get("popup_position_x", self._SETTINGS_DEFAULTS["popup_position_x"])
+            ),
+            "popupY": int(
+                cfg.get("popup_position_y", self._SETTINGS_DEFAULTS["popup_position_y"])
+            ),
+            "duration": int(
+                cfg.get("popup_duration", self._SETTINGS_DEFAULTS["popup_duration"])
+            ),
+            "scale": int(
+                round(
+                    float(
+                        cfg.get("popup_scale", self._SETTINGS_DEFAULTS["popup_scale"])
+                    )
+                    * 100
+                )
+            ),
             "debug": bool(cfg.get("debug_mode", self._SETTINGS_DEFAULTS["debug_mode"])),
-            "debugFolder": str(cfg.get("debug_folder", self._SETTINGS_DEFAULTS["debug_folder"])),
+            "debugFolder": str(
+                cfg.get("debug_folder", self._SETTINGS_DEFAULTS["debug_folder"])
+            ),
         }
 
     def save_settings(self, settings: dict[str, Any]) -> dict[str, Any]:
         """Persist UI settings into config.json (snake_case schema).
 
-        Applies side effects on the live scanner: toggling debug mode and
-        repointing the debug output folder.
+        Applies side effects on the live scanner (debug toggle/folder) and
+        on the live overlay window (position when X/Y changed via the
+        numeric inputs).
         """
         cfg = self.config.load() or {}
+        position_changed = False
         if "popupX" in settings:
             cfg["popup_position_x"] = int(settings["popupX"])
+            position_changed = True
         if "popupY" in settings:
             cfg["popup_position_y"] = int(settings["popupY"])
+            position_changed = True
         if "duration" in settings:
             cfg["popup_duration"] = max(1, int(settings["duration"]))
         if "scale" in settings:
@@ -120,13 +148,28 @@ class Bridge:
             debug_dir = Path(cfg["debug_folder"]) if cfg.get("debug_folder") else None
             self.scanner.enable_debug(bool(cfg.get("debug_mode", False)), debug_dir)
 
+        # Move the overlay window live if its position was edited via numeric inputs.
+        # Skipped while in placement mode so we don't fight the user's drag.
+        if (
+            position_changed
+            and self._overlay_window is not None
+            and self._overlay_prev_pos is None
+        ):
+            try:
+                self._overlay_window.move(
+                    int(cfg["popup_position_x"]),
+                    int(cfg["popup_position_y"]),
+                )
+            except Exception as e:  # noqa: BLE001 — best effort, log only
+                print(f"[bridge] overlay move failed: {e}")
+
         return {"ok": ok}
 
     def pick_debug_folder(self) -> Optional[str]:
         """Open the native folder dialog for the debug output folder."""
-        if not self._window:
+        if not self._main_window:
             return None
-        result = self._window.create_file_dialog(webview.FOLDER_DIALOG)
+        result = self._main_window.create_file_dialog(webview.FOLDER_DIALOG)
         if not result:
             return None
         path = result[0] if isinstance(result, (list, tuple)) else result
@@ -167,24 +210,24 @@ class Bridge:
     # ---- Window controls (frameless mode) -----------------------------------
 
     def minimize_window(self) -> None:
-        if self._window:
-            self._window.minimize()
+        if self._main_window:
+            self._main_window.minimize()
 
     def maximize_window(self) -> None:
-        if self._window:
-            self._window.toggle_fullscreen()
+        if self._main_window:
+            self._main_window.toggle_fullscreen()
 
     def close_window(self) -> None:
-        if self._window:
-            self._window.destroy()
+        if self._main_window:
+            self._main_window.destroy()
 
     # ---- Test detection -----------------------------------------------------
 
     def test_detection(self) -> dict[str, Any]:
         """Pick an image, scan it on a background thread, push result to JS."""
-        if not self._window:
+        if not self._main_window:
             return {"ok": False, "error": "Window not ready."}
-        files = self._window.create_file_dialog(
+        files = self._main_window.create_file_dialog(
             webview.OPEN_DIALOG,
             allow_multiple=False,
             file_types=(
@@ -202,6 +245,94 @@ class Bridge:
         ).start()
         return {"ok": True}
 
+    # ---- Overlay ------------------------------------------------------------
+
+    def test_overlay(self) -> dict[str, Any]:
+        """Push a sample match payload to the overlay window."""
+        sample = {
+            "time": datetime.now().strftime("%H:%M:%S"),
+            "sig": 3585,
+            "match": {
+                "tier": "rare",
+                "name": "Gold + Borase + Bexalite",
+                "cat": "ship",
+                "notes": "Mid-tier · sig 3585",
+            },
+        }
+        self._show_overlay(sample)
+        return {"ok": True}
+
+    def enter_overlay_placement_mode(self) -> dict[str, Any]:
+        """Show the overlay with a sample card, marked draggable."""
+        if self._overlay_window is None:
+            return {"ok": False, "error": "Overlay window not ready."}
+
+        # Cancel any pending auto-hide so the placement card stays visible.
+        self._cancel_overlay_hide()
+
+        # Remember current position so cancel can revert.
+        cfg = self.config.load() or {}
+        self._overlay_prev_pos = (
+            int(
+                cfg.get("popup_position_x", self._SETTINGS_DEFAULTS["popup_position_x"])
+            ),
+            int(
+                cfg.get("popup_position_y", self._SETTINGS_DEFAULTS["popup_position_y"])
+            ),
+        )
+
+        self._push_to_overlay("onPlacementMode", True)
+        try:
+            self._overlay_window.show()
+        except Exception as e:  # noqa: BLE001 — best effort
+            print(f"[bridge] overlay show failed: {e}")
+        return {"ok": True}
+
+    def confirm_overlay_position(self) -> dict[str, Any]:
+        """Read the overlay's live position, persist it, exit placement mode."""
+        if self._overlay_window is None:
+            return {"ok": False, "error": "Overlay window not ready."}
+
+        try:
+            x = int(self._overlay_window.x)
+            y = int(self._overlay_window.y)
+        except Exception as e:  # noqa: BLE001
+            return {"ok": False, "error": f"Failed to read window position: {e}"}
+
+        cfg = self.config.load() or {}
+        cfg["popup_position_x"] = x
+        cfg["popup_position_y"] = y
+        self.config.save(cfg)
+
+        self._overlay_prev_pos = None
+        self._push_to_overlay("onPlacementMode", False)
+        self._push_to_main("onOverlayPositionSaved", {"popupX": x, "popupY": y})
+        try:
+            self._overlay_window.hide()
+        except Exception as e:  # noqa: BLE001
+            print(f"[bridge] overlay hide failed: {e}")
+
+        return {"ok": True, "popupX": x, "popupY": y}
+
+    def cancel_overlay_placement(self) -> dict[str, Any]:
+        """Restore the previous overlay position and hide the window."""
+        if self._overlay_window is None:
+            return {"ok": False, "error": "Overlay window not ready."}
+
+        if self._overlay_prev_pos is not None:
+            try:
+                self._overlay_window.move(*self._overlay_prev_pos)
+            except Exception as e:  # noqa: BLE001
+                print(f"[bridge] overlay revert move failed: {e}")
+        self._overlay_prev_pos = None
+
+        self._push_to_overlay("onPlacementMode", False)
+        try:
+            self._overlay_window.hide()
+        except Exception as e:  # noqa: BLE001
+            print(f"[bridge] overlay hide failed: {e}")
+        return {"ok": True}
+
     # ---- Internals (not exposed) -------------------------------------------
 
     def _on_screenshot(self, filepath: Path) -> None:
@@ -209,14 +340,19 @@ class Bridge:
         self._scan_and_push(filepath)
 
     def _scan_and_push(self, filepath: Path) -> None:
-        """Run a scan and push the result to the JS layer."""
+        """Run a scan and push the result to both windows."""
         try:
             result = self.scanner.scan_image(filepath) if self.scanner else None
         except Exception as e:  # noqa: BLE001 — surfaced to UI as error string
             result = {"error": f"Scan failed: {e}"}
 
         payload = self._build_detection_payload(filepath, result)
-        self._push_to_js("onDetection", payload)
+        self._push_to_main("onDetection", payload)
+
+        # Show the overlay only when we have a real match — never for "NO LOCK"
+        # or scan errors (the user doesn't want noise popups).
+        if not payload.get("error") and payload.get("matches"):
+            self._show_overlay(self._build_overlay_payload(payload))
 
     @staticmethod
     def _build_detection_payload(
@@ -251,12 +387,73 @@ class Bridge:
             "error": None,
         }
 
-    def _push_to_js(self, fn_name: str, payload: Any) -> None:
+    @staticmethod
+    def _build_overlay_payload(detection: dict[str, Any]) -> dict[str, Any]:
+        """Translate a main-window detection payload into the overlay's match shape."""
+        matches = detection.get("matches") or []
+        first = matches[0] if matches else {}
+        return {
+            "time": detection.get("time"),
+            "sig": detection.get("sig"),
+            "match": {
+                "tier": first.get("tier", "unknown"),
+                "name": first.get("name", ""),
+                "cat": first.get("category", first.get("cat", "")),
+                "notes": first.get("notes", ""),
+            },
+        }
+
+    def _show_overlay(self, payload: dict[str, Any]) -> None:
+        """Push a payload to the overlay, show it, and arm the auto-hide timer."""
+        if self._overlay_window is None:
+            return
+        # Don't override placement mode with a detection.
+        if self._overlay_prev_pos is not None:
+            return
+
+        self._push_to_overlay("onOverlayDetection", payload)
+        try:
+            self._overlay_window.show()
+        except Exception as e:  # noqa: BLE001
+            print(f"[bridge] overlay show failed: {e}")
+
+        cfg = self.config.load() or {}
+        duration = max(
+            1, int(cfg.get("popup_duration", self._SETTINGS_DEFAULTS["popup_duration"]))
+        )
+        self._cancel_overlay_hide()
+        self._overlay_hide_timer = threading.Timer(duration, self._hide_overlay)
+        self._overlay_hide_timer.daemon = True
+        self._overlay_hide_timer.start()
+
+    def _hide_overlay(self) -> None:
+        if self._overlay_window is None:
+            return
+        if self._overlay_prev_pos is not None:
+            return  # Don't auto-hide while placing
+        try:
+            self._overlay_window.hide()
+        except Exception as e:  # noqa: BLE001
+            print(f"[bridge] overlay auto-hide failed: {e}")
+
+    def _cancel_overlay_hide(self) -> None:
+        if self._overlay_hide_timer is not None:
+            self._overlay_hide_timer.cancel()
+            self._overlay_hide_timer = None
+
+    def _push_to_main(self, fn_name: str, payload: Any) -> None:
+        self._evaluate(self._main_window, fn_name, payload)
+
+    def _push_to_overlay(self, fn_name: str, payload: Any) -> None:
+        self._evaluate(self._overlay_window, fn_name, payload)
+
+    @staticmethod
+    def _evaluate(window: Optional[webview.Window], fn_name: str, payload: Any) -> None:
         """Invoke `window.<fn_name>(payload)` in the renderer."""
-        if not self._window:
+        if window is None:
             return
         try:
             js = f"window.{fn_name} && window.{fn_name}({json.dumps(payload)})"
-            self._window.evaluate_js(js)
+            window.evaluate_js(js)
         except Exception as e:  # noqa: BLE001 — best-effort UI push
             print(f"[bridge] evaluate_js failed: {e}")

@@ -154,6 +154,33 @@ function App() {
     }
   }, [bridgeReady]);
 
+  const placeOverlay = useCallback(() => {
+    if (!bridgeReady) return;
+    window.pywebview.api.enter_overlay_placement_mode().catch(err =>
+      console.error('enter_overlay_placement_mode failed', err));
+  }, [bridgeReady]);
+
+  const testOverlay = useCallback(() => {
+    if (!bridgeReady) return;
+    window.pywebview.api.test_overlay().catch(err =>
+      console.error('test_overlay failed', err));
+  }, [bridgeReady]);
+
+  // PLACE OVERLAY confirms a new (x, y) on the Python side; bridge pushes it
+  // back here so the Settings X/Y readouts reflect what was actually saved.
+  useEffect(() => {
+    if (!bridgeReady) return;
+    window.onOverlayPositionSaved = (payload) => {
+      if (!payload) return;
+      setSettings(prev => ({
+        ...prev,
+        popupX: payload.popupX ?? prev.popupX,
+        popupY: payload.popupY ?? prev.popupY,
+      }));
+    };
+    return () => { delete window.onOverlayPositionSaved; };
+  }, [bridgeReady]);
+
   return (
     <div className="console-root">
       <BackgroundFX />
@@ -199,6 +226,8 @@ function App() {
               setSettings={persistSettings}
               browseDebugFolder={browseDebugFolder}
               bridgeReady={bridgeReady}
+              placeOverlay={placeOverlay}
+              testOverlay={testOverlay}
             />
           )}
           {mod === 'codex' && <CodexPanel filter={codexFilter} setFilter={setCodexFilter} />}

@@ -69,6 +69,14 @@ def _build_window_url() -> str:
     return ui_path.as_uri()
 
 
+def _build_overlay_url() -> str:
+    """Return a file:// URL for ui/overlay/index.html."""
+    ui_path = (paths.get_base_path() / "ui" / "overlay" / "index.html").resolve()
+    if not ui_path.exists():
+        raise FileNotFoundError(f"Overlay entry point not found: {ui_path}")
+    return ui_path.as_uri()
+
+
 def _build_scanner() -> object | None:
     """Construct the SignatureScanner with the project's database."""
     db_path = paths.get_data_path() / "combat_analyst_db.json"
@@ -86,19 +94,53 @@ def main() -> None:
     _splash.pump(5)
 
     _splash.set_status("Opening console...")
-    window = webview.create_window(
+
+    # Center the main window using screen dims from the live splash tk root.
+    main_w, main_h = 1020, 800
+    screen_w = _splash.root.winfo_screenwidth()
+    screen_h = _splash.root.winfo_screenheight()
+    main_x = max(0, (screen_w - main_w) // 2)
+    main_y = max(0, (screen_h - main_h) // 2)
+
+    main_window = webview.create_window(
         title="SC Signature Scanner",
         url=_build_window_url(),
         js_api=bridge,
-        width=1020,
-        height=800,
+        width=main_w,
+        height=main_h,
+        x=main_x,
+        y=main_y,
         min_size=(960, 700),
         resizable=True,
         frameless=True,
         easy_drag=False,
         background_color="#0a0e14",
     )
-    bridge._attach_window(window)
+
+    # Overlay window — hidden by default, shown only on detection / test / placement.
+    # Position from saved settings; sized to fit the card with a little margin
+    # (overlay.jsx's #root pads + cards autosize).
+    cfg = config.load() or {}
+    overlay_x = int(cfg.get("popup_position_x", 1920))
+    overlay_y = int(cfg.get("popup_position_y", 1080))
+    overlay_window = webview.create_window(
+        title="SC Signature Scanner — Overlay",
+        url=_build_overlay_url(),
+        js_api=bridge,
+        width=380,
+        height=340,
+        x=overlay_x,
+        y=overlay_y,
+        frameless=True,
+        on_top=True,
+        transparent=True,
+        easy_drag=False,
+        resizable=False,
+        hidden=True,
+        background_color="#000000",
+    )
+
+    bridge._attach_windows(main_window, overlay_window)
     _splash.pump(5)
 
     _splash.close()

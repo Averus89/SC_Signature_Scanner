@@ -1,0 +1,161 @@
+/* Overlay window — frameless, transparent, on-top.
+   Body background must be transparent so the OS-level transparency
+   shows the game underneath everything except the card itself. */
+
+:root {
+  --steel: #6b7888;
+  --font-display: "Michroma", "Rajdhani", sans-serif;
+  --font-mono: "JetBrains Mono", monospace;
+  --font-ui: "Rajdhani", sans-serif;
+  --amber: #ffaa33;
+}
+
+* { box-sizing: border-box; }
+
+html, body {
+  margin: 0;
+  padding: 0;
+  background: transparent;
+  overflow: hidden;
+  font-family: var(--font-ui);
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+#root, .overlay-root {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 8px;
+}
+
+/* Match card — mirrors the .ovc rules in main/styles.css. Kept here so the
+   overlay window has zero dependency on the main window's stylesheet. */
+.ovc {
+  display: inline-flex;
+  flex-direction: column;
+  background: linear-gradient(180deg, rgba(20,26,34,0.96) 0%, rgba(10,14,20,0.96) 100%);
+  border: 1px solid var(--tier);
+  border-left: 4px solid var(--tier);
+  padding: 10px 14px;
+  min-width: 240px;
+  box-shadow:
+    0 4px 20px rgba(0, 0, 0, 0.6),
+    0 0 16px color-mix(in oklab, var(--tier) 30%, transparent);
+  position: relative;
+}
+
+.ovc.pywebview-drag-region {
+  cursor: move;
+}
+
+.ovc-corner {
+  position: absolute;
+  width: 8px; height: 8px;
+  border: 1px solid var(--tier);
+}
+.ovc-corner.tl { top: -1px; left: -1px;  border-right:  none; border-bottom: none; }
+.ovc-corner.tr { top: -1px; right: -1px; border-left:   none; border-bottom: none; }
+.ovc-corner.bl { bottom: -1px; left: -1px;  border-right: none; border-top: none; }
+.ovc-corner.br { bottom: -1px; right: -1px; border-left:  none; border-top: none; }
+
+.ovc-head {
+  display: flex; justify-content: space-between; align-items: baseline;
+  margin-bottom: 4px;
+  font-family: var(--font-mono);
+  font-size: 9px; letter-spacing: 0.16em;
+  color: var(--steel);
+}
+.ovc-tier { color: var(--tier); font-weight: 600; }
+
+.ovc-name {
+  font-family: var(--font-display);
+  font-size: 18px; letter-spacing: 0.12em;
+  color: #fff;
+  margin-bottom: 6px;
+  text-shadow: 0 0 8px color-mix(in oklab, var(--tier) 40%, transparent);
+}
+
+.ovc-sig-readout {
+  display: flex; align-items: baseline; gap: 8px;
+  margin-bottom: 6px;
+}
+.ovc-sig-label {
+  font-family: var(--font-mono);
+  font-size: 8px; letter-spacing: 0.18em;
+  color: var(--steel);
+}
+.ovc-sig-val {
+  font-family: var(--font-mono);
+  font-size: 22px; font-weight: 600;
+  color: var(--tier);
+  text-shadow: 0 0 10px var(--tier);
+}
+
+.ovc-meta {
+  display: flex; align-items: center; gap: 6px;
+  font-family: var(--font-mono);
+  font-size: 9px; letter-spacing: 0.1em;
+  color: var(--steel);
+  margin-bottom: 6px;
+}
+.ovc-dot { width: 3px; height: 3px; background: var(--steel); border-radius: 50%; }
+
+.ovc-progress {
+  height: 2px;
+  background: rgba(255, 255, 255, 0.06);
+  overflow: hidden;
+}
+.ovc-progress-fill {
+  width: 100%; height: 100%;
+  background: var(--tier);
+  transform-origin: right center;
+  animation: ovcShrink 10s linear forwards;
+  box-shadow: 0 0 6px var(--tier);
+}
+@keyframes ovcShrink {
+  from { transform: scaleX(1); }
+  to   { transform: scaleX(0); }
+}
+
+/* Placement toolbar — only visible during drag-to-place mode. */
+.placement-toolbar {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 8px 10px;
+  background: rgba(10, 14, 20, 0.92);
+  border: 1px solid var(--amber);
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.6), 0 0 12px rgba(255, 170, 51, 0.25);
+}
+
+.pt-hint {
+  font-family: var(--font-mono);
+  font-size: 9px;
+  letter-spacing: 0.18em;
+  color: var(--amber);
+  text-align: center;
+}
+
+.pt-buttons {
+  display: flex;
+  gap: 8px;
+}
+
+.pt-btn {
+  flex: 1;
+  padding: 6px 12px;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.12em;
+  border: 1px solid currentColor;
+  background: rgba(0, 0, 0, 0.4);
+  cursor: pointer;
+  transition: background 120ms ease, color 120ms ease;
+}
+.pt-save   { color: #3effa1; }
+.pt-cancel { color: #ff6b6b; }
+.pt-save:hover   { background: rgba(62, 255, 161, 0.15); }
+.pt-cancel:hover { background: rgba(255, 107, 107, 0.15); }

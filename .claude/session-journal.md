@@ -3,10 +3,51 @@
 A living journal that persists across compactions. Captures decisions, progress, and context.
 
 ## Current State
-- **Focus:** webview UI migration on branch `feat/webview-migration`. Phases 1 + 2 done; tkinter `main.py` still parallel until full migration completes.
-- **Blocked:** nothing; Phase 2 verified, awaiting commit and start of Phase 3 (overlay window).
+- **Focus:** webview UI migration on branch `feat/webview-migration`. Phase 3 verified and ready to commit.
+- **Blocked:** nothing. PLACE OVERLAY + TEST OVERLAY confirmed working by user. Pending: commit Phase 3, then plan Phase 4 (region selector).
+- **Pickup for next session:** Plan Phase 4 — wire `region_selector.py`'s screenshot+bounding-box flow into the React UI's `REGION` panel (currently disabled in nav). Phase 5 is the JS-side `data.jsx` mock → real Python DB swap (Phase 1 known limitation: ground/salvage/collision matches show NO LOCK in reveal card despite Python identifying them correctly).
 
 ## Log
+
+### 2026-04-30 — Completed: Phase 3 verification + Settings cleanup
+- User confirmed PLACE OVERLAY drag flow + TEST OVERLAY auto-hide both work flawlessly after two follow-up fixes:
+  - Overlay window was 240px tall; toolbar (~70px) was getting clipped behind the bottom edge → bumped to 380×340.
+  - Forgot `js_api=bridge` on the overlay window → SAVE/CANCEL buttons would have been silent no-ops even when visible. Added.
+- Removed redundant in-Settings viewport thumbnail (fake screen + draggable card mock) since real PLACE OVERLAY supersedes it. JSX trimmed to instructions + X/Y readouts + CENTER + PLACE OVERLAY. `stageRef`/`dragging`/`onCardDown`/the mouse-tracking `useEffect` all gone. Orphaned CSS pruned: `.settings-screen`, `.screen-label`, `.screen-grid`, `.screen-handle`, `.screen-handle-card`, `.shc-*`, `.screen-overlay-handle`, `.overlay-mini`, `.settings-hint`. `useEffect` import dropped from `module-panels.jsx`.
+- Cache buster `v=19` → `v=20`.
+
+### 2026-04-30 — Completed: Phase 3 of webview UI migration (overlay window)
+- New files: `ui/overlay/{index.html,overlay.jsx,styles.css}` — standalone match card page, no shared deps with `ui/main`.
+- `bridge.py`: `_attach_window` → `_attach_windows(main, overlay)`. New JS-exposed methods: `test_overlay`, `enter_overlay_placement_mode`, `confirm_overlay_position`, `cancel_overlay_placement`. `_scan_and_push` now pushes log to main + match card to overlay (skipped on errors/no-match). Auto-hide via `threading.Timer(duration)`, rearmed on each new detection. `save_settings` moves overlay live when X/Y change via numeric inputs (skipped during placement mode).
+- `app_webview.py`: second `webview.create_window` for overlay — `frameless=True, on_top=True, transparent=True, easy_drag=False, hidden=True`, sized 360×240, positioned at saved x/y.
+- `ui/main/app.jsx`: `placeOverlay` + `testOverlay` callbacks; `window.onOverlayPositionSaved` listener keeps Settings X/Y in sync after a confirmed drag.
+- `ui/main/module-panels.jsx`: PLACE OVERLAY button added; TEST OVERLAY enabled; both wired to bridge.
+- Drag mechanism: `pywebview-drag-region` class toggled on card body during placement; native WebView2 drag — no JS plumbing.
+- Version: `5.1.0.dev2` → `5.1.0.dev3`. DEVLOG entry added. NOT yet committed (awaiting smoke test).
+
+### 2026-04-30 — Context: Phase 3 verification checklist (next session)
+Manual tests to run after launching `python app_webview.py`:
+1. Open SETTINGS → click PLACE OVERLAY. Overlay window should appear at saved x/y with sample "Gold + Borase + Bexalite, rare, sig 3585" card + green ✓ SAVE / red ✗ CANCEL footer.
+2. Drag the card body across the desktop (over a running game ideally). Click ✓ SAVE → overlay hides; SETTINGS X/Y readouts should update to the new position; `config.json` `popup_position_x/y` should be updated.
+3. Click PLACE OVERLAY again, drag, click ✗ CANCEL → overlay returns to previous saved position and hides.
+4. Click TEST OVERLAY → sample card appears for `popup_duration` seconds then auto-hides.
+5. ENGAGE monitoring with a real screenshot folder; drop a real SC screenshot in. Main window log AND overlay card should both update; overlay auto-hides after `popup_duration`.
+6. While NOT in placement mode, edit X/Y inputs in SETTINGS — overlay should jump to the new position live.
+7. NO LOCK / scan errors must NOT pop the overlay (only main-window log entry).
+
+Known caveats to watch for during testing:
+- `pywebview.Window.x` / `.y` — confirm they read live position on WebView2 (Windows). If they return launch-time x/y instead of current, fall back to a JS bridge that reads `window.screenX/screenY` (likely 0,0 in webview hosts) or implement drag tracking via mouse events + `move()`.
+- `transparent=True` on WebView2 — if the card has a black/grey background instead of being floating-on-game, the WebView2 transparent flag may not be honored on this Windows build; fallback is `transparent=False, background_color="#0a0e14"` and accept an opaque pill.
+
+### 2026-04-30 — Context: Phase 3 ramp (overlay window) — pickup notes
+What the existing code already assumes for Phase 3 (do not re-design these from scratch):
+- The overlay is intended to be a **second pywebview window** (`webview.create_window(...)`), NOT a tkinter `Toplevel`. Two deferred bridge methods (`pick_overlay_position`, `test_overlay`) are blocked on this — no live `tk.Tk()` root remains after splash closes.
+- React side of the overlay already exists in JSX: `OverlayCard` + `OverlayPreview` in `ui/main/module-panels.jsx` (lines ~205–256). They render a tier-aware match card. The Phase-3 task is mainly to spin them out into their own page (`ui/overlay/index.html`) and host that in a separate frameless+topmost+transparent webview window.
+- Settings already in `config.json` for the overlay: `popup_position_x`, `popup_position_y`, `popup_duration`, `popup_scale`. Bridge `save_settings` already applies them.
+- Detection-push path (`window.evaluate_js("window.onDetection(...)")`) needs to be split: the **main window** still gets the log entry; the **overlay window** gets the same payload to render the match card. Two `evaluate_js` calls per detection, one per window.
+- Designer's reference for the overlay is `Project Rockfinder/ref/TestPopup.png` (kept locally, gitignored).
+- Window flags to use: `frameless=True, on_top=True, transparent=True, easy_drag=False` and absolute (x, y) from saved settings. Click-through is NOT required (current overlay auto-hides; new one will too).
+- Auto-hide: easiest implementation is a Python-side `threading.Timer(duration, hide_overlay)`, calling `window.hide()` after the configured seconds. Re-show on each new detection.
 
 ### 2026-04-30 — Completed: Phase 2 of webview UI migration (Settings panel)
 - Bridge gained `get_settings`, `save_settings`, `pick_debug_folder`. Schema translation: React `camelCase`/`scale%` ↔ config.json `snake_case`/`float`. Compatibility with tkinter `main.py`'s schema preserved.

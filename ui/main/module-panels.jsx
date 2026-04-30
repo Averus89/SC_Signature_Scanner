@@ -1,5 +1,5 @@
 // Region / Settings / Codex / Overlay panels
-const { useState, useEffect, useRef } = React;
+const { useState, useRef } = React;
 
 // ============ REGION PANEL ============
 function RegionPanel({ region, setRegion }) {
@@ -75,61 +75,26 @@ function RegionPanel({ region, setRegion }) {
 }
 
 // ============ SETTINGS PANEL ============
-function SettingsPanel({ settings, setSettings, browseDebugFolder, bridgeReady }) {
+function SettingsPanel({
+  settings, setSettings, browseDebugFolder, bridgeReady,
+  placeOverlay, testOverlay,
+}) {
   const upd = (k, v) => setSettings(s => ({ ...s, [k]: v }));
-  const stageRef = useRef(null);
-  const [dragging, setDragging] = useState(false);
-
-  const onCardDown = (e) => {
-    e.preventDefault();
-    setDragging(true);
-  };
-  useEffect(() => {
-    if (!dragging) return;
-    const onMove = (e) => {
-      const r = stageRef.current.getBoundingClientRect();
-      const fx = (e.clientX - r.left) / r.width;
-      const fy = (e.clientY - r.top) / r.height;
-      const x = Math.max(0, Math.min(3840, Math.round(fx * 3840)));
-      const y = Math.max(0, Math.min(2160, Math.round(fy * 2160)));
-      setSettings(s => ({ ...s, popupX: x, popupY: y }));
-    };
-    const onUp = () => setDragging(false);
-    window.addEventListener('mousemove', onMove);
-    window.addEventListener('mouseup', onUp);
-    return () => {
-      window.removeEventListener('mousemove', onMove);
-      window.removeEventListener('mouseup', onUp);
-    };
-  }, [dragging, setSettings]);
 
   return (
     <div className="settings-grid">
       <Panel title="OVERLAY POSITION" code="OVR-06" status={<span className="log-count">DRAG TO PLACE</span>}>
         <div className="settings-instructions">
-          <Stencil>STEP 01</Stencil> Grab the overlay and drag it to the desired position on the game screen.
-          <br /><Stencil>STEP 02</Stencil> Position persists across sessions.
-        </div>
-        <div className="settings-screen" ref={stageRef}>
-          <div className="screen-label">VIEWPORT 3840 × 2160</div>
-          <div className="screen-grid" />
-          <div className={`screen-handle ${dragging ? 'dragging' : ''}`}
-               onMouseDown={onCardDown}
-               style={{
-                 left: `${(settings.popupX / 3840) * 100}%`,
-                 top: `${(settings.popupY / 2160) * 100}%`,
-               }}>
-            <div className="screen-handle-card">
-              <div className="shc-tier-bar" />
-              <div className="shc-name">SIGNATURE</div>
-              <div className="shc-val">3,900</div>
-            </div>
-          </div>
+          <Stencil>STEP 01</Stencil> Click PLACE OVERLAY — the live overlay appears on top of the running game.
+          <br /><Stencil>STEP 02</Stencil> Drag it where you want, click SAVE. Position persists across sessions.
         </div>
         <div className="settings-row">
           <Readout label="X" value={settings.popupX} />
           <Readout label="Y" value={settings.popupY} />
           <MrButton small onClick={() => setSettings(s => ({ ...s, popupX: 1920, popupY: 1080 }))}>CENTER</MrButton>
+        </div>
+        <div style={{ marginTop: 12, display: 'flex', gap: 8 }}>
+          <MrButton small primary onClick={placeOverlay} disabled={!bridgeReady}>PLACE OVERLAY</MrButton>
         </div>
       </Panel>
 
@@ -149,7 +114,7 @@ function SettingsPanel({ settings, setSettings, browseDebugFolder, bridgeReady }
           </label>
         </div>
         <div style={{ marginTop: 12 }}>
-          <MrButton small disabled title="Available in Phase 3 (overlay window migration)">TEST OVERLAY</MrButton>
+          <MrButton small onClick={testOverlay} disabled={!bridgeReady}>TEST OVERLAY</MrButton>
         </div>
       </Panel>
 

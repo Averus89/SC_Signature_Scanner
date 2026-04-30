@@ -49,6 +49,39 @@ The devlog shall always contain a clear "Current Status" or "Next Steps" section
 
 ## Changelog
 
+### 2026-04-30 — v5.1.0.dev3: Webview UI migration · Phase 3 (overlay window)
+
+Branch `feat/webview-migration`. The in-game overlay popup is now its own pywebview window — frameless, on-top, transparent — separate from the main console. Detections push to both windows: the main window logs them, the overlay shows the tier-aware match card and auto-hides after `popup_duration` seconds.
+
+**Architecture:**
+The overlay is a second `webview.create_window(...)`, not a `tk.Toplevel`. A single `Bridge` instance is shared by both windows; `_attach_windows(main, overlay)` replaced the old single-window setter. Detection-push split into `_push_to_main` (log) + `_push_to_overlay` (match card). Auto-hide is a `threading.Timer(duration, self._hide_overlay)`, cancelled and rearmed on each new detection so back-to-back hits extend visibility.
+
+**Drag-to-place flow:**
+The PLACE OVERLAY button in Settings calls `enter_overlay_placement_mode()`, which shows the overlay with a sample card and toggles `pywebview-drag-region` on the card body — WebView2 handles the native drag from there. The user drags the card across the screen onto the running game, then clicks SAVE; the bridge reads the window's live `(x, y)`, persists to `config.json`, and pushes the new position back to the main window so the X/Y readouts stay in sync. CANCEL reverts via `overlay.move(*prev_pos)`. No live-drag JS plumbing needed.
+
+**Files added:**
+- `ui/overlay/index.html` — minimal React + Babel page, transparent body, no scrollbars.
+- `ui/overlay/overlay.jsx` — standalone `OverlayCard` (lifted from `module-panels.jsx`) + `PlacementToolbar` rendered only during placement. Receives data via `window.onOverlayDetection(payload)` and `window.onPlacementMode(active)`.
+- `ui/overlay/styles.css` — only the `.ovc*` rules + tier color vars + placement toolbar; zero dependency on `ui/main/styles.css`.
+
+**Files modified:**
+- `bridge.py` — `_attach_window` → `_attach_windows(main, overlay)`. New methods exposed to JS: `test_overlay`, `enter_overlay_placement_mode`, `confirm_overlay_position`, `cancel_overlay_placement`. `_scan_and_push` now also pushes to the overlay when `matches` is non-empty (skipped on errors and NO LOCK). `save_settings` moves the overlay live when X/Y change via numeric inputs (skipped while in placement mode so it doesn't fight the drag). `confirm_overlay_position` pushes `onOverlayPositionSaved` back to the main window.
+- `app_webview.py` — second `webview.create_window(...)` after the main window: `frameless=True, on_top=True, transparent=True, easy_drag=False, hidden=True`, sized 360×240, positioned at saved `popup_position_x/y`. Both windows handed to the bridge via `_attach_windows`.
+- `ui/main/module-panels.jsx` — `SettingsPanel` props extended with `placeOverlay` + `testOverlay`. PLACE OVERLAY button added (primary), TEST OVERLAY enabled (was gated behind a Phase-3 tooltip).
+- `ui/main/app.jsx` — `placeOverlay` and `testOverlay` callbacks added; new `window.onOverlayPositionSaved` listener updates Settings X/Y after a confirmed drag-to-place.
+- `ui/main/styles.css` — added `.settings-hint` class (small steel caption next to PLACE OVERLAY).
+- `ui/main/index.html` — cache busters `v=18` → `v=19`.
+- `version_checker.py` — `5.1.0.dev2` → `5.1.0.dev3`.
+
+**Verified manually:** Pending — UI test next session. Items to verify: PLACE OVERLAY shows the card, drag works, SAVE persists `(x, y)` to config.json and updates Settings readouts; CANCEL reverts; TEST OVERLAY pushes the sample payload and auto-hides after `duration` seconds; real screenshot drop into the watched folder shows the match card on the overlay AND a log entry on the main window; numeric X/Y inputs move the overlay live (when not in placement mode); duration/scale changes apply on next detection.
+
+**Out of scope (deferred):**
+- Click-through overlay — auto-hide is enough for now.
+- Live scale CSS-var push from `save_settings` — overlay uses fixed sizing today; revisit if scale becomes important to verify before relaunch.
+- Fixing the broken HUD preview in `module-panels.jsx::OverlayCard` (uses class names like `.overlay-card`, `.ovc-header`, `.ovc-corners`, `.ovc-rivets`, `.ovc-code` that don't exist in `ui/main/styles.css`). Phase 2 leftover; cosmetic only.
+
+---
+
 ### 2026-04-30 — v5.1.0.dev2: Webview UI migration · Phase 2 (Settings panel)
 
 Branch `feat/webview-migration`. The Settings panel is now wired end-to-end through the bridge to the existing `config.json`. The `SETTINGS` radial nav button is enabled.
