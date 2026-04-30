@@ -49,6 +49,80 @@ The devlog shall always contain a clear "Current Status" or "Next Steps" section
 
 ## Changelog
 
+### 2026-04-30 — v5.1.0.dev7: Windows OCR primary, EasyOCR fallback + UI polish
+
+Branch `feat/webview-migration`. Two streams of work landed together:
+
+**1. Windows OCR backend (primary).** Added a new `_WindowsOcrBackend` to `scanner.py` that wraps `Windows.Media.Ocr` via the modular `winrt-*` Python packages. The scanner picks Windows OCR at construction when the `en-US` profile is supported; falls back to EasyOCR otherwise. Windows OCR is faster (no model download, ~50ms per scan vs EasyOCR's 200ms+) and far better on clean UI digits than EasyOCR — which is optimised for natural-scene text rather than HUD glyphs.
+
+**Lazy EasyOCR import.** The eager `import easyocr` at module load was crashing the app with `OSError [WinError 1114]` on systems where torch's native DLLs fail to initialise. Moved the import behind `_try_import_easyocr()` (deferred to first scan that actually needs it), broadened the catch from `ImportError` to `(ImportError, OSError)`, and skipped it entirely when Windows OCR is the active backend.
+
+**Confidence honesty.** Windows.Media.Ocr.OcrResult exposes no confidence number, so `_ocr_signature_windows` returns `None` for confidence rather than fabricating a 1.0. The chain (`scan_image` → `ocr_confidence` → `payload.ocrConfidence`) preserves None all the way to React, where the reveal card shows `—` instead of a misleading `100%`.
+
+**Files modified for OCR backend:**
+- `scanner.py` — new `_WindowsOcrBackend` class; `__init__` picks the active backend and sets `engine_name`; `_ocr_signature` dispatches; `is_ocr_available` knows about both; lazy `_try_import_easyocr`; debug-output formatting handles `confidence=None`.
+- `requirements.txt` — added `winrt-runtime` + per-namespace packages (`Media.Ocr`, `Globalization`, `Graphics.Imaging`, `Storage.Streams`, `Foundation`, `Foundation.Collections`); demoted EasyOCR to fallback.
+- `bridge.py` — `get_initial_state` returns `ocrEngine` from `scanner.engine_name`.
+- `SC_Signature_Scanner.spec` — added `winrt` hidden imports + `collect_submodules('winrt')`.
+- `ui/main/app.jsx` — bootstrap stores `ocrEngine`, passes to `SettingsPanel`.
+- `ui/main/module-panels.jsx` — Settings shows the live engine name, no longer hardcoded `"EasyOCR"`.
+- `TODO.md` — Windows OCR investigation marked done.
+
+**2. UI polish.**
+
+- **Detection log reorder.** Was `time | tier | name | sig` and prone to text overlapping at narrow widths. Now `time | type | count | classification | sig` with each cell `min-width: 0` + `text-overflow: ellipsis` so long mineral names truncate cleanly. Bridge surfaces `nameOnly` (name + tier subtitle, no count) and `count` so each column has its own field.
+- **CONF readout.** The Target Profile's `DELTA / ±0` cell was always meaningless (Python's matches always return `signature == base × count` exactly). Replaced with `CONF / NN%` showing OCR confidence. `app.jsx::onDetection` now threads `payload.ocrConfidence` through to the entry. With Windows OCR the value is `null` → renders as `—`; with EasyOCR it's a real percentage.
+- **Overlay polish (continuation of Phase 6 era).**
+  - Dropped `transparent=True` on the overlay window — WebView2's transparency was producing visible composition artifacts (a "dislocated backdrop" effect at non-100% scale). Window is now opaque with `background_color="#0a0e14"` matching the card's bottom-gradient color, so any leftover empty area inside the window is the same dark color as the card edges and visually disappears.
+  - JS-driven auto-hide replaces the previous `threading.Timer` approach that didn't reliably dispatch `Window.hide()` from a non-main thread.
+  - `instance` counter forces React to remount `OverlayCard` on every new payload so the progress-bar CSS animation restarts (was only running on first show).
+  - Live scale propagation in `save_settings`: when the slider moves and the overlay is visible, the bridge resizes the window and re-pushes the last payload with the new scale so the card updates without waiting for the next detection. Hidden-window `move()` no longer side-effects the window into visibility (only fires when X or Y truly changed).
+  - Placement toolbar shrunk ~30% (padding/font/gaps multiplied by 0.7), with matching tighter window dims (`_OVERLAY_BASE_W = 272`, `_OVERLAY_BASE_H = 152`, `_OVERLAY_PLACEMENT_BASE_H = 200`).
+
+- **Display-match shape extended.** `_to_display_match` now includes `nameOnly`, `count`, and `sig` alongside the existing `name`/`nameMain`/`nameSubtitle`/`tier`/`cat`/`notes`. Lets the React side compose the new log columns and CONF readout cleanly.
+
+**Version:** `5.1.0.dev6` → `5.1.0.dev7`.
+
+**Verified manually:** Windows OCR active by default (Settings shows `OCR ENGINE: Windows OCR`); Torite ×3 / Large Wreck Debris ×3 both resolve correctly; overlay scaling no longer produces dislocated backdrop; placement toolbar fits cleanly; detection log columns align with no text overlap.
+
+**Future work flagged in TODO:** screen-capture replacement for screenshot-file scanning (uses `Windows.Graphics.Capture` on the monitor; borderless windowed required, exclusive fullscreen explicitly out of scope).
+
+---
+
+### 2026-04-30 — v5.1.0.dev6: Webview UI migration · Phase 6 (packaging cleanup)
+
+Branch `feat/webview-migration`. The legacy tkinter app is gone. With Phases 1–5 verified and the webview UI fully covering the feature surface (scanner, settings, overlay, region picker, real DB matches), the tk codepath is dead weight. Phase 6 removes it from the tree and points the PyInstaller build at `app_webview.py`.
+
+**Files deleted:**
+- `main.py` — full tkinter UI (~1600 lines). Replaced by `app_webview.py` + `bridge.py` + the React UI under `ui/main/`.
+- `theme.py` — `RegolithTheme`, `WarningBanner`, `UpdateBanner`, `StatusIndicator`. Only consumed by `main.py` and `overlay.py`.
+- `overlay.py` — `OverlayPopup` + `PositionAdjuster` (legacy tk overlay). Replaced by `ui/overlay/`.
+
+**Files retained but worth noting:**
+- `region_selector.py` — still imported by `bridge.pick_region`. Plan was to inline/port to webview-native in this phase, but Phase 4 verified the existing tk picker works and rewriting it is throwaway work for a future phase. `PIL._tkinter_finder` and tkinter stay in the bundle for it (and for `splash.py`).
+
+**`SC_Signature_Scanner.spec`:**
+- Entry script `main.py` → `app_webview.py`.
+- `datas` extended with `ui/main/` and `ui/overlay/` so PyInstaller bundles the React UI into the frozen exe (otherwise `paths.get_base_path() / "ui" / ...` won't find the HTML/JSX/CSS).
+- `hiddenimports` adds `webview`, `webview.platforms.edgechromium`, plus `collect_submodules('webview')`.
+
+**`build.py`:**
+- Pre-build sanity check switched from `main.py` to `app_webview.py`.
+- `required_files` updated: drops `main.py`, `theme.py`, `overlay.py`; adds `app_webview.py`, `bridge.py`, `ui/main/index.html`, `ui/overlay/index.html`.
+
+**`README.md`:** `python main.py` → `python app_webview.py`.
+
+**Version:** `5.1.0.dev5` → `5.1.0.dev6`.
+
+**Verified manually:** Pending — frozen exe build via `python build.py` next session. Items to verify: PyInstaller picks up the new entry; the bundled exe finds and loads `ui/main/index.html`; WebView2 dependency resolves; OCR + region selector + overlay all work in the frozen build.
+
+**Out of scope (deferred):**
+- Webview-native rewrite of the region selector (so we can drop `region_selector.py` and tkinter entirely). Tracked as a future phase.
+- Removing the `dist/` directory at the repo root (it's a stale frozen build from before Phase 6 — in `.gitignore` already).
+- README update for the broader Settings/Usage section that still describes the tkinter-era flow.
+
+---
+
 ### 2026-04-30 — v5.1.0.dev5: Webview UI migration · Phase 5 (real signature DB)
 
 Branch `feat/webview-migration`. The React UI now uses Python's signature database as the single source of truth. Phase 1 left `ui/main/data.jsx` as a hardcoded JS mock containing only ship-mining minerals — ground deposits and salvage debris fell through to `NO LOCK` in the reveal card even though `scanner.match_signature` was correctly identifying them. Phase 5 wires the real DB into the React layer.

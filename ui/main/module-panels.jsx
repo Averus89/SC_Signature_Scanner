@@ -36,7 +36,7 @@ function RegionPanel({ region, pickRegion, clearRegion, bridgeReady, busy }) {
 // ============ SETTINGS PANEL ============
 function SettingsPanel({
   settings, setSettings, browseDebugFolder, bridgeReady,
-  placeOverlay, testOverlay,
+  placeOverlay, testOverlay, ocrEngine,
 }) {
   const upd = (k, v) => setSettings(s => ({ ...s, [k]: v }));
 
@@ -91,7 +91,7 @@ function SettingsPanel({
               <MrButton small icon="▸" onClick={browseDebugFolder} disabled={!bridgeReady}>BROWSE</MrButton>
             </div>
           </div>
-          <Readout label="OCR ENGINE" value="EasyOCR" accent="var(--green)" />
+          <Readout label="OCR ENGINE" value={ocrEngine || '—'} accent="var(--green)" />
           <Readout label="SC PATCH" value="4.7+" />
         </div>
       </Panel>

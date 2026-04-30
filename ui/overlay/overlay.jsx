@@ -15,11 +15,16 @@ const TIERS = {
   unknown:   { label: "UNKNOWN",   color: "#ff3b30" },
 };
 
-function OverlayCard({ payload, draggable }) {
+function OverlayCard({ payload, draggable, durationSec }) {
   if (!payload) return null;
   const m = payload.match || {};
   const t = TIERS[m.tier] || TIERS.unknown;
   const cls = "ovc" + (draggable ? " pywebview-drag-region" : "");
+  // The progress bar's CSS animation is set inline so it matches the
+  // configured popup_duration. The OverlayCard is keyed by an external
+  // counter so React remounts it on every new payload — that restarts the
+  // CSS animation reliably (otherwise React reuses the DOM node and the
+  // animation only plays the first time).
   return (
     <div className={cls} style={{ "--tier": t.color }}>
       <span className="ovc-corner tl" />
@@ -42,7 +47,12 @@ function OverlayCard({ payload, draggable }) {
         <span className="ovc-dot" />
         <span>{(m.notes || "").split("—")[0]}</span>
       </div>
-      <div className="ovc-progress"><div className="ovc-progress-fill" /></div>
+      <div className="ovc-progress">
+        <div
+          className="ovc-progress-fill"
+          style={durationSec ? { animationDuration: `${durationSec}s` } : undefined}
+        />
+      </div>
     </div>
   );
 }
@@ -72,21 +82,46 @@ const SAMPLE_PAYLOAD = {
 function OverlayApp() {
   const [payload, setPayload] = useState(null);
   const [placing, setPlacing] = useState(false);
+  // Bumping `instance` on each new push forces OverlayCard to unmount and
+  // remount, which restarts the progress-bar CSS animation.
+  const [instance, setInstance] = useState(0);
 
   useEffect(() => {
     window.onOverlayDetection = (p) => {
       setPlacing(false);
       setPayload(p);
+      setInstance((n) => n + 1);
     };
-    window.onPlacementMode = (active) => {
-      setPlacing(!!active);
-      setPayload(active ? SAMPLE_PAYLOAD : null);
+    window.onPlacementMode = (data) => {
+      const active = !!(data && (data === true || data.active));
+      const scale = (data && data.scale) || 1;
+      setPlacing(active);
+      setPayload(active ? { ...SAMPLE_PAYLOAD, scale } : null);
+      setInstance((n) => n + 1);
     };
     return () => {
       delete window.onOverlayDetection;
       delete window.onPlacementMode;
     };
   }, []);
+
+  // JS-driven auto-hide. Triggered on every new detection payload (not in
+  // placement mode). Replaces the previous Python threading.Timer approach,
+  // which was unreliable because Window.hide() doesn't always dispatch
+  // cleanly from a non-main thread on WebView2.
+  useEffect(() => {
+    if (!payload || placing) return;
+    const dur = payload.duration;
+    if (!dur || dur <= 0) return;
+    const id = setTimeout(() => {
+      setPayload(null);
+      if (window.pywebview && window.pywebview.api && window.pywebview.api.hide_overlay) {
+        window.pywebview.api.hide_overlay()
+          .catch((err) => console.error("hide_overlay failed", err));
+      }
+    }, dur * 1000);
+    return () => clearTimeout(id);
+  }, [payload, placing, instance]);
 
   const confirmPlacement = () => {
     if (window.pywebview && window.pywebview.api) {
@@ -104,9 +139,19 @@ function OverlayApp() {
 
   if (!payload && !placing) return null;
 
+  // CSS `zoom` scales all descendants — fonts, spacing, borders, animations
+  // — and is honored by Chromium-based engines (WebView2). Combined with
+  // the bridge resizing the window to base × scale, the card visually
+  // grows/shrinks together with its window.
+  const scale = (payload && payload.scale) || 1;
   return (
-    <div className="overlay-root">
-      <OverlayCard payload={payload} draggable={placing} />
+    <div className="overlay-root" style={{ zoom: scale }}>
+      <OverlayCard
+        key={instance}
+        payload={payload}
+        draggable={placing}
+        durationSec={!placing && payload ? payload.duration : null}
+      />
       {placing && (
         <PlacementToolbar onSave={confirmPlacement} onCancel={cancelPlacement} />
       )}

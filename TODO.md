@@ -314,12 +314,26 @@ ROC or FPS mining. 100% single mineral per cluster.
 - [ ] Add rare asteroid variants to overlay UI (they display generically now)
 - [ ] In-game verification: confirm rare asteroid signatures are visible on HUD (3540-3600)
 - [ ] GPU acceleration option for OCR (currently CPU-only)
-- [ ] **Investigate Windows OCR (WinRT) as EasyOCR replacement**
-  - Windows OCR is purpose-built for clean screen/UI text; EasyOCR is optimised for natural scene text (photos)
-  - Expected benefits: faster startup (no 3–5s model load, no 115MB download), faster per-scan, potentially better digit accuracy on HUD fonts
-  - App is already Windows-only so no portability penalty
-  - Python access via `winrt` package (`winrt-Windows.Media.Ocr`)
-  - Approach: implement as a second OCR backend, A/B test against EasyOCR on real SC screenshots before committing to a swap
+- [x] **Windows OCR (WinRT) as primary, EasyOCR fallback** — DONE (2026-04-30)
+  - Implemented in `scanner.py::_WindowsOcrBackend` using `winrt-Windows.Media.Ocr`
+  - Scanner picks Windows OCR at construction when `en-US` profile is supported; falls back to EasyOCR otherwise
+  - EasyOCR import is now lazy so torch DLL failures degrade gracefully
+  - Confidence not exposed by Windows.Media.Ocr.OcrResult — UI shows `—` instead of fabricating a value
+- [ ] **Replace screenshot-file scanning with live screen capture**
+  - Today: user (or a hotkey) saves a screenshot to disk → watchdog notices → scanner OCRs the file → match displays
+  - Drawbacks of file-based flow: clutters the screenshots folder, requires manual capture or auto-screenshot config, ~50–200ms file IO per scan, can't run continuously
+  - Goal: capture the screen directly in-process at a low rate (≈1–2 fps), crop to the existing `scan_region.json` bbox (already in screen-pixel coords), OCR the numpy array, push detections live
+  - Capture API options:
+    1. **`Windows.Graphics.Capture` (WinRT) on the monitor** — `GraphicsCaptureItem.create_from_monitor_handle(hMonitor)`. Modern, hardware-accelerated, no special permissions. Already accessible via the `winrt-*` packages we use for OCR (one more pip add: `winrt-Windows.Graphics.Capture`).
+    2. **DXGI Output Duplication** — slightly faster full-screen capture; lower-level. Fallback if `GraphicsCapture` proves unsuitable.
+    3. **`PrintWindow` / `BitBlt`** — unreliable on hardware-accelerated game windows; skip.
+  - Anti-cheat: not a real concern. We capture the **screen**, not the game process — same thing every screenshot tool does at the OS level. EAC is concerned with memory reads, DLL injection, and kernel hooks, none of which apply. Still worth a quick smoke test against a live SC session before shipping, just to be safe.
+  - **Display mode requirement: borderless windowed (hard requirement).** Already documented in the UI ticker for the overlay's sake; live capture inherits the same requirement. Exclusive fullscreen vs borderless is no longer a real tradeoff in 2026 — modern users run borderless because exclusive breaks OBS, Discord, screen-share, and any on-top overlay (including ours). Don't burn effort designing around exclusive fullscreen; if a user is on it, surface a clear "switch to borderless" message and stop there.
+  - Open considerations:
+    - **Capture cadence** — 1–2 fps OCR is plenty; gate the loop so it pauses when SC isn't the foreground window (no point scanning the desktop)
+    - **Multi-monitor** — `scan_region.json` stores screen-pixel coords. If the user moves SC to a different monitor, the saved region might point at the wrong display. Either store monitor-relative coords or detect-and-warn
+    - **Region picker stays as-is** — `region_selector.py` keeps using a saved screenshot to draw the bbox; that workflow already produces screen-pixel coords which are exactly what live capture needs
+  - Migration path: keep the screenshot-folder watcher as an opt-in fallback while live-capture is bedded in; don't rip out `monitor.py` until the new flow is verified across patches
 - [ ] **Ship identification by size/performance class** — DEFERRED until SC scanner rework ships
   - Concept: use CS value to identify size class (Small/Medium/Large/XL/Capital), EM+IR ratio for performance class (Competition/Stealth/Military/Industrial)
   - Approach: one wide scan region captures all three HUD values (IR | EM | CS, left to right); EasyOCR bounding boxes identify which is which by horizontal position

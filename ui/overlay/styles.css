@@ -1,6 +1,8 @@
-/* Overlay window — frameless, transparent, on-top.
-   Body background must be transparent so the OS-level transparency
-   shows the game underneath everything except the card itself. */
+/* Overlay window — frameless, on-top, OPAQUE.
+   Window has a solid dark background (set via pywebview background_color)
+   matching the card's bottom-gradient color so window edges blend cleanly.
+   Transparency was dropped because WebView2 produced visible composition
+   artifacts that created a "dislocated backdrop" effect at non-100% scale. */
 
 :root {
   --steel: #6b7888;
@@ -15,19 +17,23 @@
 html, body {
   margin: 0;
   padding: 0;
-  background: transparent;
+  background: #0a0e14;
   overflow: hidden;
   font-family: var(--font-ui);
   user-select: none;
   -webkit-user-select: none;
 }
 
+/* Card stays content-sized (preserves min-width and tier border).
+   2px padding draws a thin dark border between the tier frame and the
+   window edge; any leftover space sits on the body's #0a0e14 background
+   which matches the card's bottom gradient. */
 #root, .overlay-root {
   display: flex;
   flex-direction: column;
   align-items: flex-start;
-  gap: 8px;
-  padding: 8px;
+  gap: 6px;
+  padding: 2px;
 }
 
 /* Match card — mirrors the .ovc rules in main/styles.css. Kept here so the
@@ -123,8 +129,8 @@ html, body {
 .placement-toolbar {
   display: flex;
   flex-direction: column;
-  gap: 6px;
-  padding: 8px 10px;
+  gap: 4px;
+  padding: 6px 7px;
   background: rgba(10, 14, 20, 0.92);
   border: 1px solid var(--amber);
   box-shadow: 0 4px 20px rgba(0, 0, 0, 0.6), 0 0 12px rgba(255, 170, 51, 0.25);
@@ -132,7 +138,7 @@ html, body {
 
 .pt-hint {
   font-family: var(--font-mono);
-  font-size: 9px;
+  font-size: 7px;
   letter-spacing: 0.18em;
   color: var(--amber);
   text-align: center;
@@ -140,14 +146,14 @@ html, body {
 
 .pt-buttons {
   display: flex;
-  gap: 8px;
+  gap: 6px;
 }
 
 .pt-btn {
   flex: 1;
-  padding: 6px 12px;
+  padding: 4px 8px;
   font-family: var(--font-mono);
-  font-size: 11px;
+  font-size: 8px;
   font-weight: 600;
   letter-spacing: 0.12em;
   border: 1px solid currentColor;

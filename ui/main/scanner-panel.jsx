@@ -54,12 +54,17 @@ function ScannerPanel({ detections, monitoring, toggleMonitoring, simulateDetect
 }
 
 function LogEntry({ entry }) {
-  const t = window.TIERS[entry.match?.tier] || window.TIERS.unknown;
+  const m = entry.match;
+  const t = window.TIERS[m?.tier] || window.TIERS.unknown;
+  const type = m?.cat ? m.cat.toUpperCase() : '—';
+  const count = m?.count && m.count > 1 ? `×${m.count}` : '×1';
+  const classification = m?.nameOnly || m?.name || '— NO LOCK —';
   return (
-    <div className={`log-entry ${entry.match ? 'hit' : 'miss'}`} style={{ '--tier': t.color }}>
+    <div className={`log-entry ${m ? 'hit' : 'miss'}`} style={{ '--tier': t.color }}>
       <div className="log-time">{entry.time}</div>
-      <div className="log-tier" style={{ color: t.color }}>{t.label}</div>
-      <div className="log-name">{entry.match?.name || '— NO LOCK —'}</div>
+      <div className="log-type">{type}</div>
+      <div className="log-qty" style={{ color: t.color }}>{m ? count : ''}</div>
+      <div className="log-class" style={{ color: m ? '#fff' : 'var(--red)' }}>{classification}</div>
       <div className="log-sig">{entry.sig.toLocaleString()}</div>
     </div>
   );
@@ -113,7 +118,11 @@ function RevealCard({ latest, tweak }) {
           </div>
           <div className="reveal-meta">
             <Readout label="EXPECTED" value={m ? m.sig.toLocaleString() : '—'} accent={t.color} />
-            <Readout label="DELTA" value={m ? `±${Math.abs(m.sig - latest.sig)}` : '—'} accent={t.color} />
+            <Readout
+              label="CONF"
+              value={latest.ocrConfidence != null ? `${Math.round(latest.ocrConfidence * 100)}%` : '—'}
+              accent={t.color}
+            />
             <Readout label="CAT" value={m?.cat?.toUpperCase() || '—'} accent={t.color} />
           </div>
           {m && <div className="reveal-notes">{m.notes}</div>}

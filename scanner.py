@@ -5,12 +5,14 @@ Detects signature values from Star Citizen screenshots using OCR.
 
 Requires a scan region to be configured in Settings.
 
-OCR Engine: EasyOCR (deep learning based)
-- First run downloads ~115MB of model files
-- Subsequent runs use cached models locally
-- No external binary dependencies
+OCR engines:
+- Primary: Windows OCR (Windows.Media.Ocr) — built into Windows 10/11.
+  Fast, accurate on clean UI text, no model download.
+- Fallback: EasyOCR (deep learning) — used only if the Windows OCR
+  English profile isn't available. ~115MB model download on first use.
 """
 
+import io
 import json
 import re
 from datetime import datetime
@@ -25,22 +27,100 @@ import paths
 
 import region_selector
 
-# EasyOCR import - lazy initialization
-HAS_EASYOCR = False
-EASYOCR_ERROR = None
+# ===== Windows OCR (preferred) =====
+HAS_WINDOWS_OCR = False
+WINDOWS_OCR_ERROR: Optional[str] = None
+
+try:
+    from winrt.windows.media.ocr import OcrEngine as _WinOcrEngine
+    from winrt.windows.globalization import Language as _WinLanguage
+    from winrt.windows.graphics.imaging import BitmapDecoder as _WinBitmapDecoder
+    from winrt.windows.storage.streams import (
+        InMemoryRandomAccessStream as _WinInMemoryStream,
+        DataWriter as _WinDataWriter,
+    )
+    HAS_WINDOWS_OCR = True
+except ImportError as e:
+    WINDOWS_OCR_ERROR = str(e)
+
+# ===== EasyOCR (fallback) =====
+# Import is deferred to first use — eager import pulls in torch (~200MB
+# DLLs), which slows startup AND crashes hard on systems where torch's
+# native libs can't load. With Windows OCR primary, EasyOCR is rarely
+# needed, so paying that cost upfront is wasteful.
+HAS_EASYOCR: Optional[bool] = None  # None = not tried; True/False = result
+EASYOCR_ERROR: Optional[str] = None
+_easyocr_module: Any = None
 
 # Pillow 10.0.0+ removed ANTIALIAS, but EasyOCR still uses it
-# Add compatibility shim before importing easyocr
 import PIL.Image
 if not hasattr(PIL.Image, 'ANTIALIAS'):
     PIL.Image.ANTIALIAS = PIL.Image.Resampling.LANCZOS
 
-try:
-    import easyocr
-    HAS_EASYOCR = True
-except ImportError as e:
-    EASYOCR_ERROR = str(e)
-    print(f"Warning: EasyOCR not installed. OCR disabled. Error: {e}")
+
+def _try_import_easyocr() -> bool:
+    """Attempt to import easyocr on demand. Caches the result.
+
+    Catches both ImportError (package missing) and OSError (torch DLL
+    fails to load — common with conflicting MSVC runtimes / GPU drivers).
+    """
+    global HAS_EASYOCR, EASYOCR_ERROR, _easyocr_module
+    if HAS_EASYOCR is not None:
+        return HAS_EASYOCR
+    try:
+        import easyocr as _ez
+        _easyocr_module = _ez
+        HAS_EASYOCR = True
+    except (ImportError, OSError) as e:
+        EASYOCR_ERROR = str(e)
+        HAS_EASYOCR = False
+        print(f"[scanner] EasyOCR unavailable: {e}")
+    return HAS_EASYOCR
+
+
+class _WindowsOcrBackend:
+    """Windows.Media.Ocr-backed OCR. Built into Windows 10/11.
+
+    OcrEngine instances are documented as agile (thread-safe), so we create
+    one in __init__ and reuse it for every scan, even when scans run on
+    background threads spawned by the bridge.
+    """
+
+    def __init__(self) -> None:
+        if not HAS_WINDOWS_OCR:
+            raise RuntimeError(WINDOWS_OCR_ERROR or "winrt packages not installed")
+
+        lang = _WinLanguage("en-US")
+        if not _WinOcrEngine.is_language_supported(lang):
+            raise RuntimeError("English (en-US) OCR profile not installed in Windows")
+
+        engine = _WinOcrEngine.try_create_from_language(lang)
+        if engine is None:
+            raise RuntimeError("OcrEngine.try_create_from_language returned None")
+        self._engine = engine
+
+    def recognize(self, img_array: np.ndarray) -> str:
+        """Run OCR on the array, return the full recognised text."""
+        # numpy → PNG bytes — PNG keeps the upscaled binarised image lossless
+        pil = Image.fromarray(img_array)
+        buf = io.BytesIO()
+        pil.save(buf, format="PNG")
+        png_bytes = buf.getvalue()
+
+        # Build a Windows in-memory stream from the bytes
+        stream = _WinInMemoryStream()
+        writer = _WinDataWriter(stream.get_output_stream_at(0))
+        writer.write_bytes(png_bytes)
+        writer.store_async().get()
+        writer.flush_async().get()
+        writer.detach_stream()
+        stream.seek(0)
+
+        # Decode → SoftwareBitmap → run OCR (sync via .get() on AsyncOperation)
+        decoder = _WinBitmapDecoder.create_async(stream).get()
+        bitmap = decoder.get_software_bitmap_async().get()
+        result = self._engine.recognize_async(bitmap).get()
+        return result.text or ""
 
 # Signature validity range
 MIN_SIGNATURE = 100
@@ -65,17 +145,30 @@ class SignatureScanner:
     def __init__(self, db_path: Path):
         self.db = self._load_database(db_path)
         self._build_lookups()
-        
+
         self.debug_mode = False
         self.debug_dir = paths.get_debug_path()
         self.last_debug_info = {}
         self._debug_prefix = ""  # Timestamp prefix for debug files
-        
-        # EasyOCR reader - lazily initialized on first use
+
+        # OCR backend selection — Windows OCR primary, EasyOCR fallback.
+        # The selection happens once at construction time; per-scan
+        # fallback would add complexity for an unproven benefit.
+        self._windows_ocr: Optional[_WindowsOcrBackend] = None
+        if HAS_WINDOWS_OCR:
+            try:
+                self._windows_ocr = _WindowsOcrBackend()
+            except Exception as e:  # noqa: BLE001 — falls back to EasyOCR
+                print(f"[scanner] Windows OCR unavailable, falling back to EasyOCR: {e}")
+                self._windows_ocr = None
+        self.engine_name: str = "Windows OCR" if self._windows_ocr is not None else "EasyOCR"
+
+        # EasyOCR reader - lazily initialized on first use (only loaded if
+        # we're using EasyOCR or as a manual override later).
         self._ocr_reader: Optional[Any] = None  # easyocr.Reader when available
         self._ocr_initialized = False
         self._ocr_init_error: Optional[str] = None
-        
+
         # Callback for model download progress (set by UI)
         self.on_model_download_start: Optional[Callable[[], None]] = None
         self.on_model_download_complete: Optional[Callable[[], None]] = None
@@ -93,24 +186,24 @@ class SignatureScanner:
         """
         if self._ocr_initialized:
             return self._ocr_reader
-        
-        if not HAS_EASYOCR:
+
+        if not _try_import_easyocr():
             self._ocr_init_error = EASYOCR_ERROR or "EasyOCR not installed"
             self._ocr_initialized = True
             return None
-        
+
         try:
             # Notify UI that download may start
             if self.on_model_download_start:
                 self.on_model_download_start()
-            
+
             if self.debug_mode:
                 print("[DEBUG] Initializing EasyOCR reader...")
-            
+
             # Initialize reader
             # - gpu=False: Use CPU (works everywhere, GPU auto-detected if available)
             # - verbose=False: Suppress download progress to stdout
-            self._ocr_reader = easyocr.Reader(
+            self._ocr_reader = _easyocr_module.Reader(
                 ['en'],
                 gpu=False,  # CPU mode - works universally
                 verbose=self.debug_mode
@@ -134,16 +227,24 @@ class SignatureScanner:
     
     def is_ocr_available(self) -> Tuple[bool, Optional[str]]:
         """Check if OCR is available.
-        
+
         Returns:
             Tuple of (is_available, error_message)
         """
-        if not HAS_EASYOCR:
+        # Windows OCR ready at construction time (or never, in which case
+        # we fell back to EasyOCR).
+        if self._windows_ocr is not None:
+            return True, None
+
+        # If we're in EasyOCR-fallback territory and the lazy import has
+        # already been tried, surface its result. Otherwise consider it
+        # available — the import is attempted on first scan.
+        if HAS_EASYOCR is False:
             return False, EASYOCR_ERROR or "EasyOCR not installed"
-        
+
         if self._ocr_initialized and self._ocr_init_error:
             return False, self._ocr_init_error
-        
+
         return True, None
     
     def _debug_path(self, filename: str) -> Path:
@@ -264,13 +365,14 @@ class SignatureScanner:
         signatures, ocr_text, confidence = self._ocr_signature(enhanced)
         
         if self.debug_mode:
-            print(f"[DEBUG] OCR: text='{ocr_text}' signatures={signatures} confidence={confidence:.2f}")
+            conf_str = f"{confidence:.2f}" if confidence is not None else "n/a"
+            print(f"[DEBUG] OCR: text='{ocr_text}' signatures={signatures} confidence={conf_str}")
             with open(self._debug_path("99_summary.txt"), 'w') as f:
                 f.write(f"Method: {method}\n")
                 f.write(f"Region: ({x1}, {y1}) - ({x2}, {y2})\n")
-                f.write(f"OCR engine: EasyOCR\n")
+                f.write(f"OCR engine: {self.engine_name}\n")
                 f.write(f"OCR text: {ocr_text}\n")
-                f.write(f"OCR confidence: {confidence:.2f}\n")
+                f.write(f"OCR confidence: {conf_str}\n")
                 f.write(f"Signatures found: {signatures}\n")
         
         if signatures:
@@ -469,19 +571,41 @@ class SignatureScanner:
         for base_sig, _ in self.salvage_debris_types:
             self.known_base_signatures.add(base_sig)
     
-    def _ocr_signature(self, img_array: np.ndarray) -> Tuple[List[int], str, float]:
+    def _ocr_signature(self, img_array: np.ndarray) -> Tuple[List[int], str, Optional[float]]:
         """OCR the image and extract signature numbers.
-        
+
         Args:
             img_array: RGB numpy array to OCR
-        
+
         Returns:
-            Tuple of (list of signature values, raw OCR text, confidence)
+            Tuple of (list of signature values, raw OCR text, confidence).
+            Confidence is None when the active backend doesn't expose one
+            (Windows.Media.Ocr) — we'd rather show "—" than fabricate a
+            misleading 100%.
         """
+        if self._windows_ocr is not None:
+            return self._ocr_signature_windows(img_array)
+        return self._ocr_signature_easyocr(img_array)
+
+    def _ocr_signature_windows(
+        self, img_array: np.ndarray
+    ) -> Tuple[List[int], str, Optional[float]]:
+        """Windows OCR path. Returns confidence=None because
+        Windows.Media.Ocr.OcrResult exposes no confidence number."""
+        try:
+            text = self._windows_ocr.recognize(img_array)
+            if self.debug_mode:
+                print(f"[DEBUG] Windows OCR raw text: {text!r}")
+            signatures = self._extract_signatures(text)
+            return signatures, text, None
+        except Exception as e:  # noqa: BLE001 — surfaced to UI as error string
+            return [], f"OCR ERROR: {e}", None
+
+    def _ocr_signature_easyocr(self, img_array: np.ndarray) -> Tuple[List[int], str, float]:
         reader = self._get_ocr_reader()
         if reader is None:
             return [], f"OCR ERROR: {self._ocr_init_error}", 0.0
-        
+
         try:
             # EasyOCR with digit allowlist for maximum accuracy
             # Note: Comma removed from allowlist - was causing misreads like "7,480" -> "7,4480"
@@ -492,29 +616,29 @@ class SignatureScanner:
                 paragraph=False,  # Don't merge into paragraphs
                 detail=1,  # Return bounding boxes + confidence
             )
-            
+
             if self.debug_mode:
                 print(f"[DEBUG] EasyOCR raw results: {results}")
-            
+
             # Extract text and confidence
             texts = []
             confidences = []
-            
+
             for detection in results:
                 # detection = (bbox, text, confidence)
                 if len(detection) >= 3:
                     bbox, text, conf = detection[0], detection[1], detection[2]
                     texts.append(text)
                     confidences.append(conf)
-            
+
             combined_text = ' '.join(texts)
             avg_confidence = sum(confidences) / len(confidences) if confidences else 0.0
-            
+
             # Extract signature values
             signatures = self._extract_signatures(combined_text)
-            
+
             return signatures, combined_text, avg_confidence
-            
+
         except Exception as e:
             return [], f"OCR ERROR: {e}", 0.0
     

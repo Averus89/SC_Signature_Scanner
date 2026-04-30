@@ -33,14 +33,29 @@ class Bridge:
     `pywebview.api.<method_name>(...)` and return Promises.
     """
 
+    # Base overlay window size at scale=1.0. The window resizes to
+    # base × scale after each show so scaled content fits without clipping.
+    # Sized tightly to the card's natural dimensions (min-width 240 + card
+    # padding 28 + root padding 4 ≈ 272×148) so the dark border around the
+    # tier frame stays thin. Placement mode adds ~50px for the (now
+    # 30%-shrunk) SAVE/CANCEL toolbar.
+    _OVERLAY_BASE_W = 272
+    _OVERLAY_BASE_H = 152
+    _OVERLAY_PLACEMENT_BASE_H = 200
+
     def __init__(self, scanner: Any, config: Config) -> None:
         self.scanner = scanner
         self.config = config
         self.monitor: Optional[ScreenshotMonitor] = None
         self._main_window: Optional[webview.Window] = None
         self._overlay_window: Optional[webview.Window] = None
-        self._overlay_hide_timer: Optional[threading.Timer] = None
         self._overlay_prev_pos: Optional[tuple[int, int]] = None
+        # Tracked so live setting changes (scale/duration) can update the
+        # currently-visible overlay without showing a hidden one.
+        self._overlay_visible: bool = False
+        # Last payload pushed to the overlay — re-pushed on scale changes so
+        # the rendered card picks up the new zoom factor without a relaunch.
+        self._overlay_last_payload: Optional[dict[str, Any]] = None
 
     # ---- Private setup (not exposed to JS) ---------------------------------
 
@@ -61,7 +76,8 @@ class Bridge:
         return {
             "screenshotFolder": cfg.get("screenshot_folder", ""),
             "monitoring": False,
-            "version": "5.1.0.dev5",
+            "version": "5.1.0.dev7",
+            "ocrEngine": getattr(self.scanner, "engine_name", "—") if self.scanner else "—",
         }
 
     # ---- Folder picker ------------------------------------------------------
@@ -123,21 +139,30 @@ class Bridge:
         """Persist UI settings into config.json (snake_case schema).
 
         Applies side effects on the live scanner (debug toggle/folder) and
-        on the live overlay window (position when X/Y changed via the
-        numeric inputs).
+        on the live overlay window (move when position changed; resize +
+        re-push when scale changed and overlay is visible).
         """
         cfg = self.config.load() or {}
-        position_changed = False
-        if "popupX" in settings:
-            cfg["popup_position_x"] = int(settings["popupX"])
-            position_changed = True
-        if "popupY" in settings:
-            cfg["popup_position_y"] = int(settings["popupY"])
-            position_changed = True
+
+        # Track only ACTUAL value changes so we don't ping the overlay window
+        # on every keystroke. React always sends the full settings dict, so
+        # checking just for key presence would resize/move on every save.
+        old_x = int(cfg.get("popup_position_x", 0))
+        old_y = int(cfg.get("popup_position_y", 0))
+        old_scale = float(cfg.get("popup_scale", 1.0))
+
+        new_x = int(settings["popupX"]) if "popupX" in settings else old_x
+        new_y = int(settings["popupY"]) if "popupY" in settings else old_y
+        new_scale = (
+            max(0.5, min(2.0, float(settings["scale"]) / 100.0))
+            if "scale" in settings else old_scale
+        )
+
+        cfg["popup_position_x"] = new_x
+        cfg["popup_position_y"] = new_y
+        cfg["popup_scale"] = new_scale
         if "duration" in settings:
             cfg["popup_duration"] = max(1, int(settings["duration"]))
-        if "scale" in settings:
-            cfg["popup_scale"] = max(0.5, min(2.0, float(settings["scale"]) / 100.0))
         if "debug" in settings:
             cfg["debug_mode"] = bool(settings["debug"])
         if "debugFolder" in settings:
@@ -145,25 +170,42 @@ class Bridge:
 
         ok = self.config.save(cfg)
 
-        # Apply live to the scanner so the next scan picks up the change
         if self.scanner is not None:
             debug_dir = Path(cfg["debug_folder"]) if cfg.get("debug_folder") else None
             self.scanner.enable_debug(bool(cfg.get("debug_mode", False)), debug_dir)
 
-        # Move the overlay window live if its position was edited via numeric inputs.
-        # Skipped while in placement mode so we don't fight the user's drag.
+        position_changed = (new_x != old_x) or (new_y != old_y)
+        scale_changed = abs(new_scale - old_scale) > 1e-6
+
+        # Move only if X or Y actually changed AND we're not in placement mode
+        # (placement uses an explicit drag flow). Calling move() unconditionally
+        # was previously side-effecting hidden WebView2 windows into visibility.
         if (
             position_changed
             and self._overlay_window is not None
             and self._overlay_prev_pos is None
         ):
             try:
-                self._overlay_window.move(
-                    int(cfg["popup_position_x"]),
-                    int(cfg["popup_position_y"]),
-                )
+                self._overlay_window.move(new_x, new_y)
             except Exception as e:  # noqa: BLE001 — best effort, log only
                 print(f"[bridge] overlay move failed: {e}")
+
+        # Live scale propagation: when the scale slider moves, resize the
+        # overlay window and re-push the last payload so React picks up the
+        # new zoom factor without waiting for the next detection.
+        if scale_changed and self._overlay_window is not None:
+            if self._overlay_prev_pos is not None:
+                # Placement mode is active — resize with toolbar height and
+                # re-push the placement signal so React updates zoom too.
+                self._resize_overlay(new_scale, with_toolbar=True)
+                self._push_to_overlay(
+                    "onPlacementMode", {"active": True, "scale": new_scale}
+                )
+            elif self._overlay_visible and self._overlay_last_payload is not None:
+                self._resize_overlay(new_scale)
+                refreshed = {**self._overlay_last_payload, "scale": new_scale}
+                self._overlay_last_payload = refreshed
+                self._push_to_overlay("onOverlayDetection", refreshed)
 
         return {"ok": ok}
 
@@ -367,14 +409,27 @@ class Bridge:
                 name_main = base_name
             full_name = name_main
 
+        # nameOnly = name without the count suffix, e.g. "Torite (Uncommon)"
+        # for ship_mining, "Large Wreck Debris" for salvage/ground. Used by
+        # the detection log's Classification column where Count has its own
+        # cell.
+        if name_subtitle:
+            name_only = f"{py_match.get('mineral') or name_main} {name_subtitle}".strip()
+        else:
+            name_only = Bridge._COUNT_SUFFIX_RE.sub("", py_match.get("name", "")).strip()
+            if not name_only:
+                name_only = name_main
+
         return {
             "name": full_name,
             "nameMain": name_main,
             "nameSubtitle": name_subtitle,
+            "nameOnly": name_only,
             "tier": tier,
             "cat": cat,
             "notes": py_match.get("mining_method") or "",
             "sig": int(py_match.get("signature") or 0),
+            "count": int(py_match.get("count") or py_match.get("panels") or 1),
         }
 
     # ---- Scan region --------------------------------------------------------
@@ -481,9 +536,6 @@ class Bridge:
         if self._overlay_window is None:
             return {"ok": False, "error": "Overlay window not ready."}
 
-        # Cancel any pending auto-hide so the placement card stays visible.
-        self._cancel_overlay_hide()
-
         # Remember current position so cancel can revert.
         cfg = self.config.load() or {}
         self._overlay_prev_pos = (
@@ -495,11 +547,35 @@ class Bridge:
             ),
         )
 
-        self._push_to_overlay("onPlacementMode", True)
+        # Apply current scale so the user sees the actual size they're placing.
+        scale = self._current_overlay_scale(cfg)
+
+        self._push_to_overlay("onPlacementMode", {"active": True, "scale": scale})
         try:
             self._overlay_window.show()
+            self._overlay_visible = True
         except Exception as e:  # noqa: BLE001 — best effort
             print(f"[bridge] overlay show failed: {e}")
+        # resize must be called AFTER show — pywebview's resize() silently
+        # no-ops on a hidden window in WebView2.
+        self._resize_overlay(scale, with_toolbar=True)
+        return {"ok": True}
+
+    def hide_overlay(self) -> dict[str, bool]:
+        """JS-callable hide. The overlay's React app calls this when its
+        auto-hide setTimeout (driven by `popup_duration`) fires."""
+        if self._overlay_window is None:
+            return {"ok": False}
+        # Don't hide while in placement mode — placement uses the explicit
+        # confirm/cancel buttons.
+        if self._overlay_prev_pos is not None:
+            return {"ok": True}
+        try:
+            self._overlay_window.hide()
+            self._overlay_visible = False
+            self._overlay_last_payload = None
+        except Exception as e:  # noqa: BLE001 — best effort
+            print(f"[bridge] hide_overlay failed: {e}")
         return {"ok": True}
 
     def confirm_overlay_position(self) -> dict[str, Any]:
@@ -523,6 +599,8 @@ class Bridge:
         self._push_to_main("onOverlayPositionSaved", {"popupX": x, "popupY": y})
         try:
             self._overlay_window.hide()
+            self._overlay_visible = False
+            self._overlay_last_payload = None
         except Exception as e:  # noqa: BLE001
             print(f"[bridge] overlay hide failed: {e}")
 
@@ -543,6 +621,8 @@ class Bridge:
         self._push_to_overlay("onPlacementMode", False)
         try:
             self._overlay_window.hide()
+            self._overlay_visible = False
+            self._overlay_last_payload = None
         except Exception as e:  # noqa: BLE001
             print(f"[bridge] overlay hide failed: {e}")
         return {"ok": True}
@@ -621,42 +701,50 @@ class Bridge:
         }
 
     def _show_overlay(self, payload: dict[str, Any]) -> None:
-        """Push a payload to the overlay, show it, and arm the auto-hide timer."""
+        """Push a payload to the overlay and show it. Auto-hide is driven by
+        the overlay's React app via setTimeout + a callback to hide_overlay,
+        so the timing stays in sync with the progress-bar animation."""
         if self._overlay_window is None:
             return
         # Don't override placement mode with a detection.
         if self._overlay_prev_pos is not None:
             return
 
-        self._push_to_overlay("onOverlayDetection", payload)
-        try:
-            self._overlay_window.show()
-        except Exception as e:  # noqa: BLE001
-            print(f"[bridge] overlay show failed: {e}")
-
         cfg = self.config.load() or {}
         duration = max(
             1, int(cfg.get("popup_duration", self._SETTINGS_DEFAULTS["popup_duration"]))
         )
-        self._cancel_overlay_hide()
-        self._overlay_hide_timer = threading.Timer(duration, self._hide_overlay)
-        self._overlay_hide_timer.daemon = True
-        self._overlay_hide_timer.start()
+        scale = self._current_overlay_scale(cfg)
 
-    def _hide_overlay(self) -> None:
+        enriched = {**payload, "duration": duration, "scale": scale}
+        self._overlay_last_payload = enriched
+        self._push_to_overlay("onOverlayDetection", enriched)
+        try:
+            self._overlay_window.show()
+            self._overlay_visible = True
+        except Exception as e:  # noqa: BLE001
+            print(f"[bridge] overlay show failed: {e}")
+        # resize must be called AFTER show — pywebview's resize() silently
+        # no-ops on a hidden window in WebView2.
+        self._resize_overlay(scale)
+
+    def _current_overlay_scale(self, cfg: dict[str, Any]) -> float:
+        return max(
+            0.5,
+            min(2.0, float(cfg.get("popup_scale", self._SETTINGS_DEFAULTS["popup_scale"]))),
+        )
+
+    def _resize_overlay(self, scale: float, with_toolbar: bool = False) -> None:
         if self._overlay_window is None:
             return
-        if self._overlay_prev_pos is not None:
-            return  # Don't auto-hide while placing
+        base_h = self._OVERLAY_PLACEMENT_BASE_H if with_toolbar else self._OVERLAY_BASE_H
         try:
-            self._overlay_window.hide()
-        except Exception as e:  # noqa: BLE001
-            print(f"[bridge] overlay auto-hide failed: {e}")
-
-    def _cancel_overlay_hide(self) -> None:
-        if self._overlay_hide_timer is not None:
-            self._overlay_hide_timer.cancel()
-            self._overlay_hide_timer = None
+            self._overlay_window.resize(
+                int(self._OVERLAY_BASE_W * scale),
+                int(base_h * scale),
+            )
+        except Exception as e:  # noqa: BLE001 — best effort
+            print(f"[bridge] overlay resize failed: {e}")
 
     def _push_to_main(self, fn_name: str, payload: Any) -> None:
         self._evaluate(self._main_window, fn_name, payload)

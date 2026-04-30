@@ -978,7 +978,8 @@ html, body { display: flex; align-items: center; justify-content: center; }
 }
 .log-entry {
   display: grid;
-  grid-template-columns: 70px 84px 1fr 70px;
+  /* time | type | count | classification | signature */
+  grid-template-columns: 64px 64px 44px minmax(0, 1fr) 70px;
   gap: 10px;
   padding: 6px 10px;
   border-left: 2px solid var(--tier, var(--amber));
@@ -988,10 +989,27 @@ html, body { display: flex; align-items: center; justify-content: center; }
 }
 @keyframes logIn { from { opacity: 0; transform: translateX(-12px); } }
 .log-entry.miss { border-left-color: var(--red); }
-.log-time { color: var(--steel); font-size: 10px; }
-.log-tier { font-family: var(--font-display); font-size: 10px; letter-spacing: 0.16em; }
-.log-name { color: #fff; }
-.log-sig { text-align: right; color: var(--amber-hot); font-weight: 600; }
+.log-entry > * {
+  /* Prevent any column from spilling into the next when text is long. */
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
+}
+.log-time { color: var(--steel); font-size: 10px; font-family: var(--font-mono); }
+.log-type {
+  font-family: var(--font-mono); font-size: 10px;
+  letter-spacing: 0.16em; color: var(--steel);
+}
+.log-qty {
+  font-family: var(--font-mono); font-size: 11px;
+  font-weight: 600; letter-spacing: 0.04em;
+}
+.log-class { color: #fff; font-size: 12px; }
+.log-sig {
+  text-align: right; color: var(--amber-hot);
+  font-weight: 600; font-family: var(--font-mono);
+}
 .log-count { font-family: var(--font-mono); font-size: 10px; letter-spacing: 0.16em; color: var(--steel); }
 
 /* ================================================================

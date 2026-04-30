@@ -25,6 +25,7 @@ function App() {
   const [detections, setDetections] = useState([]);
   const [region, setRegion] = useState(null);
   const [regionBusy, setRegionBusy] = useState(false);
+  const [ocrEngine, setOcrEngine] = useState('—');
   const [screenshotFolder, setScreenshotFolder] = useState('');
   const [codexFilter, setCodexFilter] = useState('all');
   const [settings, setSettings] = useState({
@@ -58,6 +59,7 @@ function App() {
       if (state && typeof state.screenshotFolder === 'string') {
         setScreenshotFolder(state.screenshotFolder);
       }
+      if (state && state.ocrEngine) setOcrEngine(state.ocrEngine);
       if (sets) setSettings(sets);
       if (reg) setRegion(reg);
       if (db) {
@@ -105,6 +107,7 @@ function App() {
         time: payload.time || fmtTime(new Date()),
         error: payload.error || null,
         pythonMatches: payload.matches || [],
+        ocrConfidence: payload.ocrConfidence ?? null,
       });
     };
     return () => { delete window.onDetection; };
@@ -284,6 +287,7 @@ function App() {
               bridgeReady={bridgeReady}
               placeOverlay={placeOverlay}
               testOverlay={testOverlay}
+              ocrEngine={ocrEngine}
             />
           )}
           {mod === 'codex' && <CodexPanel filter={codexFilter} setFilter={setCodexFilter} />}

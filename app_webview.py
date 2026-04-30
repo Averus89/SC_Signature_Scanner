@@ -133,11 +133,14 @@ def main() -> None:
         y=overlay_y,
         frameless=True,
         on_top=True,
-        transparent=True,
         easy_drag=False,
         resizable=False,
         hidden=True,
-        background_color="#000000",
+        # Solid dark background matching the card's bottom-gradient color so
+        # window edges blend with the card. Dropping `transparent=True`
+        # removed the see-through effect but also removed the WebView2
+        # composition artifacts that caused the "dislocation" backdrop.
+        background_color="#0a0e14",
     )
 
     bridge._attach_windows(main_window, overlay_window)

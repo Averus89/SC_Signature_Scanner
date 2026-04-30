@@ -3,11 +3,27 @@
 A living journal that persists across compactions. Captures decisions, progress, and context.
 
 ## Current State
-- **Focus:** webview UI migration on branch `feat/webview-migration`. Phases 1–4 committed. Phase 5 verified (Torite ×3, Large Wreck Debris ×3 both resolve correctly), in tree, ready to commit.
-- **Blocked:** nothing.
-- **Pickup for next session:** Phase 6 — packaging cleanup. Drop `main.py`, `theme.py`, `overlay.py`, `region_selector.py` (after confirming nothing else imports it), update PyInstaller `.spec` to point at `app_webview.py` and bundle `ui/main/` + `ui/overlay/`.
+- **Focus:** webview UI migration + Windows OCR + UI polish, all on `feat/webview-migration`. Ready to commit.
+- **Blocked:** nothing. Phase 6 (packaging cleanup) and Phase 7 (Windows OCR primary, EasyOCR fallback) plus a batch of UI polish (overlay scaling/transparency/placement toolbar, detection log reorder, CONF readout) all in tree.
+- **Pickup for next session:** Run `python build.py` to produce the frozen exe and verify it boots with Windows OCR + the bundled UI. After: merge `feat/webview-migration` → `master` (or open PR). Future work tracked in TODO: screen-capture replacement for screenshot scanning (uses `Windows.Graphics.Capture`).
 
 ## Log
+
+### 2026-04-30 — Completed: Phase 6 of webview UI migration (packaging cleanup)
+- Deleted `main.py`, `theme.py`, `overlay.py` (legacy tk app + theme + tk overlay class). Verified no other code imports them (`overlay.py` was only imported by `main.py`; `theme.py` only by `main.py` and `overlay.py`).
+- Kept `region_selector.py` for now — bridge.pick_region uses it. Webview-native rewrite is a future phase (low priority since it works).
+- `SC_Signature_Scanner.spec`: entry script `main.py` → `app_webview.py`. Added `ui/main/` and `ui/overlay/` to `datas` so the frozen exe bundles the React UI. Added `webview` + `webview.platforms.edgechromium` to `hiddenimports`, plus `collect_submodules('webview')`.
+- `build.py`: pre-build sanity check switched from `main.py` to `app_webview.py`. `required_files` updated.
+- `README.md`: `python main.py` → `python app_webview.py`. Settings/Usage prose still describes tk-era — deferred (cosmetic).
+- Version `5.1.0.dev5` → `5.1.0.dev6`. NOT yet committed.
+
+### 2026-04-30 — Context: Phase 6 verification checklist (next session)
+1. `python build.py` — should run PyInstaller against the new spec without errors.
+2. Frozen exe at `dist/SC_Signature_Scanner/SC_Signature_Scanner.exe` should launch and show the React console (NOT the deleted tk UI).
+3. Inside the frozen exe: scanner panel, settings, overlay (PLACE OVERLAY + TEST OVERLAY), region picker, PING flow all work.
+4. WebView2 must be available on the target machine (Edge Chromium runtime — preinstalled on Win10/11).
+
+If the frozen build fails to find `ui/main/index.html`, the `datas` paths in the .spec are wrong. The runtime resolution is `paths.get_base_path() / "ui" / "main" / "index.html"`; in a frozen bundle, `get_base_path()` returns `sys._MEIPASS` (the temp extract dir). The `.spec`'s `datas` tuples are `(source, dest_in_bundle)` — so `(str(PROJECT_ROOT / 'ui' / 'main'), 'ui/main')` extracts to `_MEIPASS/ui/main/` which matches. Should work.
 
 ### 2026-04-30 — Completed: Phase 5 verification + display fixes
 - Black-screen-on-PING root cause: `RevealCard` line 108 read `m.sig.toLocaleString()` but the new display match shape lacked `sig`. Fixed by adding `sig` (matched-target signature) to `_to_display_match`.
