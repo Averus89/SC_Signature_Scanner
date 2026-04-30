@@ -5,7 +5,7 @@ const MODULES = [
   { id: 'scanner',  label: 'SCANNER',  code: '01', glyph: '◉' },
   { id: 'index',    label: 'INDEX',    code: '02', glyph: '≡', disabled: true },
   { id: 'overlay',  label: 'HUD',      code: '03', glyph: '◇', disabled: true },
-  { id: 'region',   label: 'REGION',   code: '04', glyph: '⊞', disabled: true },
+  { id: 'region',   label: 'REGION',   code: '04', glyph: '⊞' },
   { id: 'settings', label: 'SETTINGS', code: '05', glyph: '⚙' },
 ];
 
@@ -23,7 +23,8 @@ function App() {
   const [mod, setMod] = useState('scanner');
   const [monitoring, setMonitoring] = useState(false);
   const [detections, setDetections] = useState([]);
-  const [region, setRegion] = useState({ x: 2360, y: 358, w: 405, h: 158 });
+  const [region, setRegion] = useState(null);
+  const [regionBusy, setRegionBusy] = useState(false);
   const [screenshotFolder, setScreenshotFolder] = useState('');
   const [codexFilter, setCodexFilter] = useState('all');
   const [settings, setSettings] = useState({
@@ -51,11 +52,13 @@ function App() {
     Promise.all([
       window.pywebview.api.get_initial_state(),
       window.pywebview.api.get_settings(),
-    ]).then(([state, sets]) => {
+      window.pywebview.api.get_scan_region(),
+    ]).then(([state, sets, reg]) => {
       if (state && typeof state.screenshotFolder === 'string') {
         setScreenshotFolder(state.screenshotFolder);
       }
       if (sets) setSettings(sets);
+      if (reg) setRegion(reg);
     }).catch(err => console.error('bootstrap failed', err));
   }, [bridgeReady]);
 
@@ -154,6 +157,29 @@ function App() {
     }
   }, [bridgeReady]);
 
+  const pickRegion = useCallback(async () => {
+    if (!bridgeReady || regionBusy) return;
+    setRegionBusy(true);
+    try {
+      const result = await window.pywebview.api.pick_region();
+      if (result?.ok && result.region) setRegion(result.region);
+    } catch (err) {
+      console.error('pick_region failed', err);
+    } finally {
+      setRegionBusy(false);
+    }
+  }, [bridgeReady, regionBusy]);
+
+  const clearRegion = useCallback(async () => {
+    if (!bridgeReady) return;
+    try {
+      await window.pywebview.api.clear_scan_region();
+      setRegion(null);
+    } catch (err) {
+      console.error('clear_scan_region failed', err);
+    }
+  }, [bridgeReady]);
+
   const placeOverlay = useCallback(() => {
     if (!bridgeReady) return;
     window.pywebview.api.enter_overlay_placement_mode().catch(err =>
@@ -219,7 +245,15 @@ function App() {
               latest={latest}
             />
           )}
-          {mod === 'region' && <RegionPanel region={region} setRegion={setRegion} />}
+          {mod === 'region' && (
+            <RegionPanel
+              region={region}
+              pickRegion={pickRegion}
+              clearRegion={clearRegion}
+              bridgeReady={bridgeReady}
+              busy={regionBusy}
+            />
+          )}
           {mod === 'settings' && (
             <SettingsPanel
               settings={settings}

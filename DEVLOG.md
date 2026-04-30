@@ -49,6 +49,32 @@ The devlog shall always contain a clear "Current Status" or "Next Steps" section
 
 ## Changelog
 
+### 2026-04-30 — v5.1.0.dev4: Webview UI migration · Phase 4 (region selector)
+
+Branch `feat/webview-migration`. The OCR scan region picker is now reachable from the React `REGION` panel; the panel itself is enabled in the radial nav. The picker still uses the existing tk-based `RegionSelector` (load screenshot → drag rectangle → save) — this was a deliberate plan-B decision to reuse the tested image+canvas UX rather than reimplement it in JS. Phase 6 will retire `region_selector.py` along with `main.py`.
+
+**Architecture decision — plan B (reuse tk RegionSelector):**
+The two paths considered were (A) port the canvas+clicks fully into React, or (B) keep the tk picker and launch it from a bridge call. Picked B because the tk version already does scaled-image-to-original-coord math, modal lifecycle, and Esc-to-cancel — re-implementing that in React for code that's slated for removal in Phase 6 is throwaway work. The tk modal is created with `parent=None`, so `RegionSelector` builds its own short-lived `tk.Tk()` per invocation — no persistent root needed (the splash root is destroyed in Phase 1). pywebview dispatches JS calls on a worker thread; the bridge call simply calls `selector.open()` which runs `mainloop()` and blocks the worker until the modal closes. Tkinter on a non-main thread is technically unsupported but works on Windows for short modal flows.
+
+**Files modified:**
+- `bridge.py` — new methods exposed to JS: `get_scan_region()` (reads `scan_region.json` via `region_selector.load_region`), `pick_region()` (instantiates `RegionSelector(parent=None, on_save=cb).open()`, blocks until close, returns the new region or `{cancelled: true}`), `clear_scan_region()` (delegates to `region_selector.clear_region`). Module import: `import region_selector`.
+- `ui/main/module-panels.jsx` — `RegionPanel` rewritten as a thin launcher: `[PICK REGION]` (primary, disabled while busy) + `[CLEAR]` buttons + `(x1, y1) / (x2, y2) / size / status` readouts. The fake-HUD-with-drag mock interaction is removed. `useRef` import dropped (no longer needed).
+- `ui/main/app.jsx` — `region` state changed from a hard-coded `{x, y, w, h}` placeholder to `null`, hydrated from `get_scan_region()` on bootstrap; new `regionBusy` flag for the in-flight picker; new `pickRegion` and `clearRegion` callbacks; `MODULES.region.disabled` removed (nav now enabled).
+- `ui/main/index.html` — cache busters `v=20` → `v=21`.
+- `version_checker.py` — `5.1.0.dev3` → `5.1.0.dev4`.
+
+**Files unchanged but worth noting:**
+- `region_selector.py` itself is unchanged. Its `load_region()` / `save_region()` / `clear_region()` / `is_configured()` module helpers + `RegionSelector` class are reused as-is.
+- `scanner.py` already reads `scan_region.json` for OCR — the picker writes through to that file, so the scanner picks up the new region on the next scan with no further plumbing.
+
+**Verified manually:** Pending — UI test next session. Items to verify: REGION nav button enabled and panel renders; PICK REGION opens fullscreen tk picker with file dialog; loading a screenshot, dragging a rectangle, clicking Save returns to React with the new region in the readouts; CLEAR removes the region from `scan_region.json` and resets the readouts; on app relaunch with a saved region, bootstrap re-hydrates it.
+
+**Out of scope (deferred):**
+- Replacing the legacy tk `RegionSelector` with a webview-native picker. Phase 6 will retire it along with `main.py`.
+- Showing the picked region as an annotated overlay on the source screenshot in the React panel. Not required — the readouts are enough for diagnostics.
+
+---
+
 ### 2026-04-30 — v5.1.0.dev3: Webview UI migration · Phase 3 (overlay window)
 
 Branch `feat/webview-migration`. The in-game overlay popup is now its own pywebview window — frameless, on-top, transparent — separate from the main console. Detections push to both windows: the main window logs them, the overlay shows the tier-aware match card and auto-hides after `popup_duration` seconds.

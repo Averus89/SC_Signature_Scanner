@@ -1,73 +1,32 @@
 // Region / Settings / Codex / Overlay panels
-const { useState, useRef } = React;
+const { useState } = React;
 
 // ============ REGION PANEL ============
-function RegionPanel({ region, setRegion }) {
-  const [drag, setDrag] = useState(null);
-  const stageRef = useRef(null);
-
-  const onDown = (e) => {
-    const r = stageRef.current.getBoundingClientRect();
-    setDrag({ x0: e.clientX - r.left, y0: e.clientY - r.top, x1: e.clientX - r.left, y1: e.clientY - r.top });
-  };
-  const onMove = (e) => {
-    if (!drag) return;
-    const r = stageRef.current.getBoundingClientRect();
-    setDrag(d => ({ ...d, x1: e.clientX - r.left, y1: e.clientY - r.top }));
-  };
-  const onUp = () => {
-    if (drag) {
-      const x = Math.min(drag.x0, drag.x1), y = Math.min(drag.y0, drag.y1);
-      const w = Math.abs(drag.x1 - drag.x0), h = Math.abs(drag.y1 - drag.y0);
-      if (w > 8 && h > 8) setRegion({ x: Math.round(x*5), y: Math.round(y*5), w: Math.round(w*5), h: Math.round(h*5) });
-    }
-    setDrag(null);
-  };
-
-  const box = drag ? {
-    left: Math.min(drag.x0, drag.x1),
-    top: Math.min(drag.y0, drag.y1),
-    width: Math.abs(drag.x1 - drag.x0),
-    height: Math.abs(drag.y1 - drag.y0),
-  } : null;
-
+function RegionPanel({ region, pickRegion, clearRegion, bridgeReady, busy }) {
+  const r = region || null;
   return (
     <div className="region-grid">
       <Panel title="SCAN REGION CALIBRATION" code="REG-05" accent="var(--amber)">
         <div className="region-instructions">
-          <Stencil>STEP 01</Stencil> Drag a rectangle over the in-game signature value.
-          <br /><Stencil>STEP 02</Stencil> Confirm. Calibration persists across sessions.
+          <Stencil>STEP 01</Stencil> Click PICK REGION — choose a screenshot, drag a rectangle over the in-game signature value, click Save.
+          <br /><Stencil>STEP 02</Stencil> The scanner reads OCR from this rectangle on every screenshot. Calibration persists across sessions.
         </div>
-        <div className="region-stage" ref={stageRef}
-             onMouseDown={onDown} onMouseMove={onMove} onMouseUp={onUp} onMouseLeave={onUp}>
-          <div className="region-fake-hud">
-            <div className="hud-readout">
-              <div className="hud-label">SIGNATURE</div>
-              <div className="hud-value">3,900</div>
-            </div>
-            <div className="hud-corner tl" /><div className="hud-corner tr" />
-            <div className="hud-corner bl" /><div className="hud-corner br" />
-            <div className="hud-noise" />
-          </div>
-          {box && <div className="region-selection" style={box}><span>{box.width.toFixed(0)}×{box.height.toFixed(0)}</span></div>}
-          {region && !drag && (
-            <div className="region-saved" style={{ left: region.x/5, top: region.y/5, width: region.w/5, height: region.h/5 }}>
-              <span>SAVED</span>
-            </div>
-          )}
-          <div className="region-crosshair" />
+        <div style={{ marginTop: 16, display: 'flex', gap: 8 }}>
+          <MrButton small primary onClick={pickRegion} disabled={!bridgeReady || busy}>
+            {busy ? 'PICKING…' : 'PICK REGION'}
+          </MrButton>
+          <MrButton small onClick={clearRegion} disabled={!bridgeReady || !r || busy}>CLEAR</MrButton>
         </div>
       </Panel>
 
       <Panel title="REGION DATA" code="REG-DAT" accent="var(--amber)">
         <div className="region-data">
-          <Readout label="ORIGIN" value={region ? `${region.x},${region.y}` : '—'} />
-          <Readout label="SIZE"   value={region ? `${region.w}×${region.h}` : '—'} />
-          <Readout label="STATUS" value={region ? 'LOCKED' : 'UNSET'} accent={region ? 'var(--green)' : 'var(--red)'} glow />
-        </div>
-        <div style={{ marginTop: 16, display: 'flex', gap: 8 }}>
-          <MrButton small onClick={() => setRegion(null)}>CLEAR</MrButton>
-          <MrButton small primary onClick={() => setRegion({ x: 2360, y: 358, w: 405, h: 158 })}>USE LAST KNOWN</MrButton>
+          <Readout label="TOP-LEFT"     value={r ? `${r.x1}, ${r.y1}` : '—'} />
+          <Readout label="BOTTOM-RIGHT" value={r ? `${r.x2}, ${r.y2}` : '—'} />
+          <Readout label="SIZE"         value={r ? `${r.width}×${r.height}` : '—'} />
+          <Readout label="STATUS"
+                   value={r ? 'LOCKED' : 'UNSET'}
+                   accent={r ? 'var(--green)' : 'var(--red)'} glow />
         </div>
       </Panel>
     </div>

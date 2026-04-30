@@ -22,6 +22,7 @@ import webview
 
 from config import Config
 from monitor import ScreenshotMonitor
+import region_selector
 
 
 class Bridge:
@@ -59,7 +60,7 @@ class Bridge:
         return {
             "screenshotFolder": cfg.get("screenshot_folder", ""),
             "monitoring": False,
-            "version": "5.1.0.dev3",
+            "version": "5.1.0.dev4",
         }
 
     # ---- Folder picker ------------------------------------------------------
@@ -243,6 +244,88 @@ class Bridge:
             args=(Path(path_str),),
             daemon=True,
         ).start()
+        return {"ok": True}
+
+    # ---- Scan region --------------------------------------------------------
+
+    def get_scan_region(self) -> Optional[dict[str, int]]:
+        """Return the saved OCR scan region or None if not configured."""
+        region = region_selector.load_region()
+        if region is None:
+            return None
+        x1, y1, x2, y2 = region
+        return {
+            "x1": x1, "y1": y1, "x2": x2, "y2": y2,
+            "width": x2 - x1, "height": y2 - y1,
+        }
+
+    def pick_region(self) -> dict[str, Any]:
+        """Pick a screenshot, then open the legacy tk-based region selector
+        on it. Blocks until the user clicks Save or Cancel. The selector
+        writes through to scan_region.json on save; this method returns the
+        new region (or None if cancelled).
+
+        The main console stays visible during the screenshot picker (so the
+        user has context), then minimizes once the fullscreen region selector
+        opens, and restores when it closes.
+        """
+        if self._main_window is None:
+            return {"ok": False, "error": "Window not ready."}
+
+        files = self._main_window.create_file_dialog(
+            webview.OPEN_DIALOG,
+            allow_multiple=False,
+            file_types=(
+                "Image files (*.png;*.jpg;*.jpeg)",
+                "All files (*.*)",
+            ),
+        )
+        if not files:
+            return {"ok": True, "cancelled": True, "region": None}
+        image_path = Path(files[0] if isinstance(files, (list, tuple)) else files)
+
+        captured: dict[str, int] = {}
+
+        def _on_save(x1: int, y1: int, x2: int, y2: int) -> None:
+            captured.update({"x1": x1, "y1": y1, "x2": x2, "y2": y2})
+
+        try:
+            self._main_window.minimize()
+        except Exception as e:  # noqa: BLE001 — best effort
+            print(f"[bridge] main minimize failed: {e}")
+
+        try:
+            selector = region_selector.RegionSelector(parent=None, on_save=_on_save)
+            selector.open(image_path=image_path)
+        except Exception as e:  # noqa: BLE001 — surface error string to UI
+            return {"ok": False, "error": f"Region selector failed: {e}"}
+        finally:
+            self._restore_main_window()
+
+        if not captured:
+            return {"ok": True, "cancelled": True, "region": None}
+
+        return {
+            "ok": True,
+            "region": {
+                **captured,
+                "width": captured["x2"] - captured["x1"],
+                "height": captured["y2"] - captured["y1"],
+            },
+        }
+
+    def _restore_main_window(self) -> None:
+        """Bring the main console back from minimized."""
+        if self._main_window is None:
+            return
+        try:
+            self._main_window.restore()
+        except Exception as e:  # noqa: BLE001 — best effort
+            print(f"[bridge] main restore failed: {e}")
+
+    def clear_scan_region(self) -> dict[str, bool]:
+        """Delete the saved scan region."""
+        region_selector.clear_region()
         return {"ok": True}
 
     # ---- Overlay ------------------------------------------------------------

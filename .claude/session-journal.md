@@ -3,11 +3,37 @@
 A living journal that persists across compactions. Captures decisions, progress, and context.
 
 ## Current State
-- **Focus:** webview UI migration on branch `feat/webview-migration`. Phase 3 verified and ready to commit.
-- **Blocked:** nothing. PLACE OVERLAY + TEST OVERLAY confirmed working by user. Pending: commit Phase 3, then plan Phase 4 (region selector).
-- **Pickup for next session:** Plan Phase 4 — wire `region_selector.py`'s screenshot+bounding-box flow into the React UI's `REGION` panel (currently disabled in nav). Phase 5 is the JS-side `data.jsx` mock → real Python DB swap (Phase 1 known limitation: ground/salvage/collision matches show NO LOCK in reveal card despite Python identifying them correctly).
+- **Focus:** webview UI migration on branch `feat/webview-migration`. Phases 1–4 verified. Phase 4 ready to commit.
+- **Blocked:** nothing. PICK REGION → file dialog (main visible) → screenshot picked → main minimizes → fullscreen tk region selector → Save/Cancel → main restores. User confirmed working.
+- **Pickup for next session:** Phase 5 — wire the real Python signature DB into the React UI so ground deposits / salvage / collisions match correctly. Phase 1 known limitation: `ui/main/data.jsx` is a JS-side mock that misses ground/salvage. Bridge already returns `matches` from `scanner.scan_image`; React just needs to use those instead of (or alongside) `lookupSignature` from data.jsx.
 
 ## Log
+
+### 2026-04-30 — Completed: Phase 4 verification + UX fixes
+- User confirmed PICK REGION + tk modal flow works perfectly after two follow-up fixes:
+  - **Auto-minimize main console while picker is active** so user can see the screenshot they're drawing on. First attempt minimized BEFORE the file dialog opened, leaving user staring at a tiny dialog on a blank desktop ("feels like the app crashed"). Fixed by minimizing only AFTER the screenshot is picked, when the fullscreen tk window actually opens.
+  - **Swapped tk filedialog for pywebview's native `create_file_dialog`** for the screenshot picker, so we don't spawn an implicit tk root on the worker thread. The fullscreen `RegionSelector` still uses tk for its canvas (image scaling math is reused), but we pass the picked path directly via `selector.open(image_path=path)` so its internal filedialog branch never runs.
+- `_restore_main_window` helper centralizes the `window.restore()` call. The whole flow is now: file dialog (no minimize) → minimize → tk modal blocks → finally restore.
+
+### 2026-04-30 — Completed: Phase 4 of webview UI migration (region selector)
+- Architecture: plan B — reused legacy tk `RegionSelector` rather than reimplementing in React. The tk class accepts `parent=None` and creates its own short-lived `tk.Tk()`, so no persistent root needed. Bridge call runs on pywebview's worker thread and blocks on `selector.open()` until the modal closes; tkinter-on-worker-thread works on Windows for short modal flows. Phase 6 will retire `region_selector.py` together with `main.py`.
+- `bridge.py`: added `get_scan_region`, `pick_region` (returns `{ok, region}` or `{ok, cancelled}`), `clear_scan_region`. Module import `import region_selector`.
+- `ui/main/module-panels.jsx`: `RegionPanel` rewritten as launcher — `[PICK REGION]` + `[CLEAR]` + `(x1,y1)/(x2,y2)/size/status` readouts. Fake-HUD-with-drag mock removed. `useRef` import dropped.
+- `ui/main/app.jsx`: `region` state hydrated from `get_scan_region` on bootstrap; new `pickRegion`/`clearRegion` callbacks; `regionBusy` flag for in-flight picker; `MODULES.region.disabled` flag removed (nav enabled).
+- Version `5.1.0.dev3` → `5.1.0.dev4`. Cache buster `v=20` → `v=21`. DEVLOG updated. NOT yet committed.
+
+### 2026-04-30 — Context: Phase 4 verification checklist (next session)
+1. Launch `python app_webview.py`. The radial-nav `REGION` button should now be enabled (no "Coming in a later phase" tooltip).
+2. Click REGION. Panel renders with `[PICK REGION]` (amber primary) + `[CLEAR]` (greyed if no region saved) + four readouts showing `—`.
+3. Click PICK REGION. A native file dialog should appear. Select a Star Citizen screenshot. A fullscreen tk window pops up with the screenshot — drag a rectangle around the signature value.
+4. Click `✓ Save Region`. A "Saved" message box confirms; the tk window closes; React panel readouts update with the actual `(x1, y1) / (x2, y2)` and size.
+5. Click CLEAR. Readouts reset to `—`; `scan_region.json` deleted from `paths.get_user_data_path()`.
+6. Restart the app — if a region was saved before quit, the panel should re-hydrate with it on bootstrap.
+7. While monitoring, drop a real screenshot in the watched folder — `scanner.py` should crop OCR to the picked region.
+
+Known caveats to watch for:
+- **Tkinter on worker thread** — pywebview dispatches JS bridge calls to a worker. `tk.Tk()` created on a non-main thread is technically unsupported but typically works on Windows. If it crashes, the fallback is wrapping the picker call in a `subprocess` (separate Python process — clean separation of GUI loops).
+- **Modal blocks the bridge worker** — while the tk picker is open, no other JS API call can complete. Acceptable for a modal flow but worth knowing.
 
 ### 2026-04-30 — Completed: Phase 3 verification + Settings cleanup
 - User confirmed PLACE OVERLAY drag flow + TEST OVERLAY auto-hide both work flawlessly after two follow-up fixes:
