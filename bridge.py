@@ -69,6 +69,75 @@ class Bridge:
     def set_screenshot_folder(self, path: str) -> bool:
         return self.config.set("screenshot_folder", path)
 
+    # ---- Settings -----------------------------------------------------------
+
+    # config.json (snake_case, scale as float) <-> React state (camelCase, scale as int %)
+    _SETTINGS_DEFAULTS: dict[str, Any] = {
+        "popup_position_x": 1920,
+        "popup_position_y": 1080,
+        "popup_duration": 10,
+        "popup_scale": 1.0,
+        "debug_mode": False,
+        "debug_folder": "",
+    }
+
+    def get_settings(self) -> dict[str, Any]:
+        """Return current settings translated for the React UI."""
+        cfg = self.config.load() or {}
+        return {
+            "popupX": int(cfg.get("popup_position_x", self._SETTINGS_DEFAULTS["popup_position_x"])),
+            "popupY": int(cfg.get("popup_position_y", self._SETTINGS_DEFAULTS["popup_position_y"])),
+            "duration": int(cfg.get("popup_duration", self._SETTINGS_DEFAULTS["popup_duration"])),
+            "scale": int(round(float(cfg.get("popup_scale", self._SETTINGS_DEFAULTS["popup_scale"])) * 100)),
+            "debug": bool(cfg.get("debug_mode", self._SETTINGS_DEFAULTS["debug_mode"])),
+            "debugFolder": str(cfg.get("debug_folder", self._SETTINGS_DEFAULTS["debug_folder"])),
+        }
+
+    def save_settings(self, settings: dict[str, Any]) -> dict[str, Any]:
+        """Persist UI settings into config.json (snake_case schema).
+
+        Applies side effects on the live scanner: toggling debug mode and
+        repointing the debug output folder.
+        """
+        cfg = self.config.load() or {}
+        if "popupX" in settings:
+            cfg["popup_position_x"] = int(settings["popupX"])
+        if "popupY" in settings:
+            cfg["popup_position_y"] = int(settings["popupY"])
+        if "duration" in settings:
+            cfg["popup_duration"] = max(1, int(settings["duration"]))
+        if "scale" in settings:
+            cfg["popup_scale"] = max(0.5, min(2.0, float(settings["scale"]) / 100.0))
+        if "debug" in settings:
+            cfg["debug_mode"] = bool(settings["debug"])
+        if "debugFolder" in settings:
+            cfg["debug_folder"] = str(settings["debugFolder"])
+
+        ok = self.config.save(cfg)
+
+        # Apply live to the scanner so the next scan picks up the change
+        if self.scanner is not None:
+            debug_dir = Path(cfg["debug_folder"]) if cfg.get("debug_folder") else None
+            self.scanner.enable_debug(bool(cfg.get("debug_mode", False)), debug_dir)
+
+        return {"ok": ok}
+
+    def pick_debug_folder(self) -> Optional[str]:
+        """Open the native folder dialog for the debug output folder."""
+        if not self._window:
+            return None
+        result = self._window.create_file_dialog(webview.FOLDER_DIALOG)
+        if not result:
+            return None
+        path = result[0] if isinstance(result, (list, tuple)) else result
+        self.config.set("debug_folder", str(path))
+        if self.scanner is not None:
+            self.scanner.enable_debug(
+                bool(self.config.get("debug_mode", False)),
+                Path(str(path)),
+            )
+        return str(path)
+
     # ---- Monitoring ---------------------------------------------------------
 
     def start_monitoring(self) -> dict[str, Any]:

@@ -18,11 +18,17 @@ Replacing the tkinter UI with a React console hosted in pywebview, in six vertic
 - [x] Manual verification: splash, drag, BROWSE, ENGAGE, HALT, PING, real screenshot detection
 - [x] Version bump → `5.1.0.dev1`
 
-### Migration Phase 2 — Settings Panel
-- [ ] Bridge methods: `get_settings`, `save_settings`, `pick_overlay_position`, `pick_debug_folder`, `toggle_debug`
-- [ ] Persist to existing `config.json` schema (compatibility with current tkinter app)
-- [ ] Wire `<SettingsPanel>` JSX to bridge
-- [ ] Enable `SETTINGS` radial nav button
+### Migration Phase 2 — Settings Panel ✓ COMPLETE
+- [x] Bridge methods: `get_settings`, `save_settings`, `pick_debug_folder`
+- [x] Persist to existing `config.json` schema (compatibility with current tkinter app)
+- [x] Camel/snake + percent/float schema translation in the bridge
+- [x] 200 ms debounced save on every change
+- [x] Wire `<SettingsPanel>` JSX to bridge
+- [x] Enable `SETTINGS` radial nav button
+- [x] Cache-bust JSX + CSS in `index.html` so WebView2 always picks up changes
+- [x] Version bump → `5.1.0.dev2`
+- [ ] Deferred to Phase 3: `pick_overlay_position` (needs live tk root or webview overlay window)
+- [ ] Deferred to Phase 3: `test_overlay` button (same constraint)
 
 ### Migration Phase 3 — Overlay Window
 - [ ] Second `webview.create_window()` for the in-game overlay popup

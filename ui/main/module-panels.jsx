@@ -75,13 +75,10 @@ function RegionPanel({ region, setRegion }) {
 }
 
 // ============ SETTINGS PANEL ============
-function SettingsPanel({ settings, setSettings }) {
+function SettingsPanel({ settings, setSettings, browseDebugFolder, bridgeReady }) {
   const upd = (k, v) => setSettings(s => ({ ...s, [k]: v }));
   const stageRef = useRef(null);
   const [dragging, setDragging] = useState(false);
-
-  // Sample card to drag (uses a faux latest signature for visual)
-  const fauxLatest = { sig: 3900, match: { tier: 'rare', name: 'Hadanite + Bexalite', cat: 'ship', notes: '12.5K' }, time: '00:00:00' };
 
   const onCardDown = (e) => {
     e.preventDefault();
@@ -95,7 +92,6 @@ function SettingsPanel({ settings, setSettings }) {
       const fy = (e.clientY - r.top) / r.height;
       const x = Math.max(0, Math.min(3840, Math.round(fx * 3840)));
       const y = Math.max(0, Math.min(2160, Math.round(fy * 2160)));
-      upd('popupX', x);
       setSettings(s => ({ ...s, popupX: x, popupY: y }));
     };
     const onUp = () => setDragging(false);
@@ -105,7 +101,7 @@ function SettingsPanel({ settings, setSettings }) {
       window.removeEventListener('mousemove', onMove);
       window.removeEventListener('mouseup', onUp);
     };
-  }, [dragging]);
+  }, [dragging, setSettings]);
 
   return (
     <div className="settings-grid">
@@ -151,18 +147,27 @@ function SettingsPanel({ settings, setSettings }) {
             <input type="checkbox" checked={settings.debug} onChange={e => upd('debug', e.target.checked)} />
             <span>ENABLE DEBUG OUTPUT</span>
           </label>
-          <label className="lbl row">
-            <input type="checkbox" checked={settings.sound} onChange={e => upd('sound', e.target.checked)} />
-            <span>AUDIO PING ON DETECTION</span>
-          </label>
+        </div>
+        <div style={{ marginTop: 12 }}>
+          <MrButton small disabled title="Available in Phase 3 (overlay window migration)">TEST OVERLAY</MrButton>
         </div>
       </Panel>
 
       <Panel title="STORAGE" code="STO-08">
         <div className="settings-stack">
-          <Readout label="DEBUG OUT" value={settings.debugFolder} />
-          <Readout label="SCREENSHOTS PROCESSED" value="142" accent="var(--amber)" glow />
-          <Readout label="OCR ENGINE" value="EasyOCR · CUDA" accent="var(--green)" />
+          <div className="mon-folder">
+            <div className="mon-label">DEBUG OUTPUT FOLDER</div>
+            <div className="mon-folder-row">
+              <input
+                className="mr-input"
+                value={settings.debugFolder || ''}
+                onChange={e => upd('debugFolder', e.target.value)}
+                placeholder="(unset — debug output disabled)"
+              />
+              <MrButton small icon="▸" onClick={browseDebugFolder} disabled={!bridgeReady}>BROWSE</MrButton>
+            </div>
+          </div>
+          <Readout label="OCR ENGINE" value="EasyOCR" accent="var(--green)" />
           <Readout label="SC PATCH" value="4.7+" />
         </div>
       </Panel>

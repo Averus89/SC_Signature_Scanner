@@ -49,6 +49,38 @@ The devlog shall always contain a clear "Current Status" or "Next Steps" section
 
 ## Changelog
 
+### 2026-04-30 — v5.1.0.dev2: Webview UI migration · Phase 2 (Settings panel)
+
+Branch `feat/webview-migration`. The Settings panel is now wired end-to-end through the bridge to the existing `config.json`. The `SETTINGS` radial nav button is enabled.
+
+**Schema translation in the bridge:**
+React UI uses camelCase + integer percent scale; `config.json` uses snake_case + float scale (kept compatible with the running tkinter `main.py`). Mapping applied in both directions in `bridge.py`:
+
+| `config.json` (snake_case) | React state (camelCase) |
+|---|---|
+| `popup_position_x` | `popupX` |
+| `popup_position_y` | `popupY` |
+| `popup_duration` | `duration` |
+| `popup_scale` (float, e.g. `1.3`) | `scale` (int %, e.g. `130`) |
+| `debug_mode` | `debug` |
+| `debug_folder` | `debugFolder` |
+
+**Files modified:**
+- `bridge.py` — added `get_settings`, `save_settings`, `pick_debug_folder`. `save_settings` writes through `Config.save()` and applies `scanner.enable_debug(...)` so the next OCR scan picks up changes immediately.
+- `ui/main/app.jsx` — bootstrap now fetches `get_settings` alongside `get_initial_state`; new `persistSettings` callback updates state immediately and debounces a `save_settings` call by 200 ms; new `browseDebugFolder` callback; `SETTINGS` enabled in `MODULES`.
+- `ui/main/module-panels.jsx` — `SettingsPanel` props extended with `browseDebugFolder` + `bridgeReady`; debug folder is now an editable input with a BROWSE button (mirrors the scanner panel pattern); the unwired `sound` toggle removed; the fake "SCREENSHOTS PROCESSED 142" readout removed; the `TEST OVERLAY` button placeholder added but disabled with a Phase-3 tooltip.
+- `ui/main/index.html` — cache busters bumped on every `script src` and the stylesheet (`v=17` → `v=18`) so WebView2 always picks up new JSX/CSS on relaunch.
+- `version_checker.py` — `5.1.0.dev1` → `5.1.0.dev2`.
+
+**Deferred from Phase 2 (need overlay window or live tk root):**
+- "Test overlay" button — requires an `OverlayPopup` instance, but no `tk.Tk()` root is alive once the splash closes. Wires up in Phase 3.
+- "Pick position" via in-game draggable adjuster — same constraint. The in-UI drag-on-thumbnail still works for entering popup X/Y by hand.
+
+**Verified manually:**
+SETTINGS panel renders with values from existing `config.json`; dragging the screen-thumbnail updates X/Y; sliders update duration/scale; toggling debug flips `debug_mode` in `config.json` and applies live to the scanner; BROWSE picks a debug folder via native dialog; CENTER button resets to 1920/1080; TEST OVERLAY is correctly disabled with a Phase-3 tooltip.
+
+---
+
 ### 2026-04-30 — v5.1.0.dev1: Webview UI migration · Phase 1 (scaffold + scanner)
 
 Branch `feat/webview-migration`. Migration from tkinter to a React desktop UI hosted in pywebview, executed in six vertical-slice phases. Phase 1 establishes the scaffold and ports the scanner panel only; tkinter `main.py` remains runnable in parallel.

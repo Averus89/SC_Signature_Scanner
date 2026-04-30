@@ -40,3 +40,6 @@ venv/
 
 # Claude Code
 .codereview/
+
+# Designer reference archive — local-only screenshots from the JSX prototype
+Project Rockfinder/

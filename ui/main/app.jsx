@@ -6,7 +6,7 @@ const MODULES = [
   { id: 'index',    label: 'INDEX',    code: '02', glyph: '≡', disabled: true },
   { id: 'overlay',  label: 'HUD',      code: '03', glyph: '◇', disabled: true },
   { id: 'region',   label: 'REGION',   code: '04', glyph: '⊞', disabled: true },
-  { id: 'settings', label: 'SETTINGS', code: '05', glyph: '⚙', disabled: true },
+  { id: 'settings', label: 'SETTINGS', code: '05', glyph: '⚙' },
 ];
 
 function useTime() {
@@ -27,9 +27,9 @@ function App() {
   const [screenshotFolder, setScreenshotFolder] = useState('');
   const [codexFilter, setCodexFilter] = useState('all');
   const [settings, setSettings] = useState({
-    popupX: 3344, popupY: 473, duration: 10, scale: 120, debug: false, sound: true,
-    debugFolder: 'C:\\Users\\sc\\AppData\\Local\\SC_Signature_Scanner\\debug',
+    popupX: 1920, popupY: 1080, duration: 10, scale: 100, debug: false, debugFolder: '',
   });
+  const settingsSaveTimer = useRef(null);
   const [bridgeReady, setBridgeReady] = useState(
     typeof window !== 'undefined' && !!window.pywebview && !!window.pywebview.api
   );
@@ -45,14 +45,18 @@ function App() {
     return () => window.removeEventListener('pywebviewready', onReady);
   }, [bridgeReady]);
 
-  // Bootstrap initial state from Python
+  // Bootstrap initial state and settings from Python
   useEffect(() => {
     if (!bridgeReady) return;
-    window.pywebview.api.get_initial_state().then(state => {
+    Promise.all([
+      window.pywebview.api.get_initial_state(),
+      window.pywebview.api.get_settings(),
+    ]).then(([state, sets]) => {
       if (state && typeof state.screenshotFolder === 'string') {
         setScreenshotFolder(state.screenshotFolder);
       }
-    }).catch(err => console.error('get_initial_state failed', err));
+      if (sets) setSettings(sets);
+    }).catch(err => console.error('bootstrap failed', err));
   }, [bridgeReady]);
 
   const ingestSig = useCallback((sig, file, override) => {
@@ -125,6 +129,31 @@ function App() {
       console.error('test_detection failed', err));
   }, [bridgeReady]);
 
+  // Settings: update local state immediately, persist to Python with a 200 ms debounce
+  const persistSettings = useCallback((updater) => {
+    setSettings(prev => {
+      const next = typeof updater === 'function' ? updater(prev) : { ...prev, ...updater };
+      if (bridgeReady) {
+        if (settingsSaveTimer.current) clearTimeout(settingsSaveTimer.current);
+        settingsSaveTimer.current = setTimeout(() => {
+          window.pywebview.api.save_settings(next).catch(err =>
+            console.error('save_settings failed', err));
+        }, 200);
+      }
+      return next;
+    });
+  }, [bridgeReady]);
+
+  const browseDebugFolder = useCallback(async () => {
+    if (!bridgeReady) return;
+    try {
+      const picked = await window.pywebview.api.pick_debug_folder();
+      if (picked) setSettings(prev => ({ ...prev, debugFolder: picked }));
+    } catch (err) {
+      console.error('pick_debug_folder failed', err);
+    }
+  }, [bridgeReady]);
+
   return (
     <div className="console-root">
       <BackgroundFX />
@@ -164,7 +193,14 @@ function App() {
             />
           )}
           {mod === 'region' && <RegionPanel region={region} setRegion={setRegion} />}
-          {mod === 'settings' && <SettingsPanel settings={settings} setSettings={setSettings} />}
+          {mod === 'settings' && (
+            <SettingsPanel
+              settings={settings}
+              setSettings={persistSettings}
+              browseDebugFolder={browseDebugFolder}
+              bridgeReady={bridgeReady}
+            />
+          )}
           {mod === 'codex' && <CodexPanel filter={codexFilter} setFilter={setCodexFilter} />}
           {mod === 'index' && <IndexPanel activeSig={latest?.sig} />}
           {mod === 'overlay' && <OverlayPreview latest={latest} settings={settings} />}

@@ -3,10 +3,19 @@
 A living journal that persists across compactions. Captures decisions, progress, and context.
 
 ## Current State
-- **Focus:** webview UI migration on branch `feat/webview-migration`. Phase 1 done; tkinter `main.py` still parallel until full migration completes.
-- **Blocked:** nothing; Phase 1 verified, awaiting decision to commit and start Phase 2 (Settings panel).
+- **Focus:** webview UI migration on branch `feat/webview-migration`. Phases 1 + 2 done; tkinter `main.py` still parallel until full migration completes.
+- **Blocked:** nothing; Phase 2 verified, awaiting commit and start of Phase 3 (overlay window).
 
 ## Log
+
+### 2026-04-30 — Completed: Phase 2 of webview UI migration (Settings panel)
+- Bridge gained `get_settings`, `save_settings`, `pick_debug_folder`. Schema translation: React `camelCase`/`scale%` ↔ config.json `snake_case`/`float`. Compatibility with tkinter `main.py`'s schema preserved.
+- `save_settings` writes through `Config.save()` AND applies `scanner.enable_debug(...)` live so the next OCR scan picks up the change without needing a relaunch.
+- React side: `persistSettings` updates state immediately, debounces save by 200 ms; `browseDebugFolder` for native folder pick; `SETTINGS` nav button enabled.
+- Removed unwired `sound` toggle (no backend) and the fake "SCREENSHOTS PROCESSED 142" readout. Added `TEST OVERLAY` placeholder button, disabled with Phase 3 tooltip.
+- Index.html: cache-busted every script + stylesheet so WebView2 picks up JSX/CSS edits on relaunch.
+- Deferred to Phase 3: `pick_overlay_position` and `test_overlay` — both require an `OverlayPopup` instance, but no live tk root remains after the splash closes.
+- Version: `5.1.0.dev1` → `5.1.0.dev2`.
 
 ### 2026-04-30 — Completed: Phase 1 of webview UI migration
 - New branch `feat/webview-migration` from master.
