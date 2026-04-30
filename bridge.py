@@ -69,7 +69,7 @@ class Bridge:
         """Open the native folder dialog. Returns the selected path or None."""
         if not self._main_window:
             return None
-        result = self._main_window.create_file_dialog(webview.FOLDER_DIALOG)
+        result = self._main_window.create_file_dialog(webview.FileDialog.FOLDER)
         if not result:
             return None
         path = result[0] if isinstance(result, (list, tuple)) else result
@@ -170,7 +170,7 @@ class Bridge:
         """Open the native folder dialog for the debug output folder."""
         if not self._main_window:
             return None
-        result = self._main_window.create_file_dialog(webview.FOLDER_DIALOG)
+        result = self._main_window.create_file_dialog(webview.FileDialog.FOLDER)
         if not result:
             return None
         path = result[0] if isinstance(result, (list, tuple)) else result
@@ -229,7 +229,7 @@ class Bridge:
         if not self._main_window:
             return {"ok": False, "error": "Window not ready."}
         files = self._main_window.create_file_dialog(
-            webview.OPEN_DIALOG,
+            webview.FileDialog.OPEN,
             allow_multiple=False,
             file_types=(
                 "Image files (*.png;*.jpg;*.jpeg;*.webp;*.bmp)",
@@ -273,7 +273,7 @@ class Bridge:
             return {"ok": False, "error": "Window not ready."}
 
         files = self._main_window.create_file_dialog(
-            webview.OPEN_DIALOG,
+            webview.FileDialog.OPEN,
             allow_multiple=False,
             file_types=(
                 "Image files (*.png;*.jpg;*.jpeg)",
