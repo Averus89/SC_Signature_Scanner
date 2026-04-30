@@ -1,0 +1,188 @@
+/* Overlay window — frameless, on-top, OPAQUE.
+   Window has a solid dark background (set via pywebview background_color)
+   matching the card's bottom-gradient color so window edges blend cleanly.
+   Transparency was dropped because WebView2 produced visible composition
+   artifacts that created a "dislocated backdrop" effect at non-100% scale. */
+
+:root {
+  --steel: #6b7888;
+  --font-display: "Michroma", "Rajdhani", sans-serif;
+  --font-mono: "JetBrains Mono", monospace;
+  --font-ui: "Rajdhani", sans-serif;
+  --amber: #ffaa33;
+}
+
+* { box-sizing: border-box; }
+
+html, body {
+  margin: 0;
+  padding: 0;
+  background: #0a0e14;
+  overflow: hidden;
+  font-family: var(--font-ui);
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+/* Detection mode: the card fills the entire window so there's literally
+   no body area visible — eliminates the "backdrop" effect entirely.
+   Placement mode: card content-sized + toolbar below; body color matches
+   card edges so any gap is invisible. */
+html, body, #root {
+  width: 100%;
+  height: 100%;
+}
+#root, .overlay-root {
+  display: flex;
+  flex-direction: column;
+}
+.overlay-root.detection {
+  height: 100%;
+}
+.overlay-root.detection .ovc {
+  flex: 1 1 auto;
+  width: 100%;
+  min-width: 0;
+}
+.overlay-root.placing {
+  align-items: flex-start;
+  gap: 6px;
+  padding: 2px;
+}
+
+/* Match card — mirrors the .ovc rules in main/styles.css. Kept here so the
+   overlay window has zero dependency on the main window's stylesheet. */
+.ovc {
+  display: inline-flex;
+  flex-direction: column;
+  background: linear-gradient(180deg, rgba(20,26,34,0.96) 0%, rgba(10,14,20,0.96) 100%);
+  border: 1px solid var(--tier);
+  border-left: 4px solid var(--tier);
+  padding: 10px 14px;
+  min-width: 240px;
+  box-shadow:
+    0 4px 20px rgba(0, 0, 0, 0.6),
+    0 0 16px color-mix(in oklab, var(--tier) 30%, transparent);
+  position: relative;
+}
+
+.ovc.pywebview-drag-region {
+  cursor: move;
+}
+
+.ovc-corner {
+  position: absolute;
+  width: 8px; height: 8px;
+  border: 1px solid var(--tier);
+}
+.ovc-corner.tl { top: -1px; left: -1px;  border-right:  none; border-bottom: none; }
+.ovc-corner.tr { top: -1px; right: -1px; border-left:   none; border-bottom: none; }
+.ovc-corner.bl { bottom: -1px; left: -1px;  border-right: none; border-top: none; }
+.ovc-corner.br { bottom: -1px; right: -1px; border-left:  none; border-top: none; }
+
+.ovc-head {
+  display: flex; justify-content: space-between; align-items: baseline;
+  margin-bottom: 4px;
+  font-family: var(--font-mono);
+  font-size: 9px; letter-spacing: 0.16em;
+  color: var(--steel);
+}
+.ovc-tier { color: var(--tier); font-weight: 600; }
+
+.ovc-name {
+  font-family: var(--font-display);
+  font-size: 18px; letter-spacing: 0.12em;
+  color: #fff;
+  text-shadow: 0 0 8px color-mix(in oklab, var(--tier) 40%, transparent);
+}
+.ovc-name-sub {
+  font-family: var(--font-display);
+  font-size: 9px;
+  letter-spacing: 0.18em;
+  color: rgba(255, 255, 255, 0.55);
+  margin-top: 2px;
+  margin-bottom: 6px;
+}
+
+.ovc-sig-readout {
+  display: flex; align-items: baseline; gap: 8px;
+  margin-bottom: 6px;
+}
+.ovc-sig-label {
+  font-family: var(--font-mono);
+  font-size: 8px; letter-spacing: 0.18em;
+  color: var(--steel);
+}
+.ovc-sig-val {
+  font-family: var(--font-mono);
+  font-size: 22px; font-weight: 600;
+  color: var(--tier);
+  text-shadow: 0 0 10px var(--tier);
+}
+
+.ovc-meta {
+  display: flex; align-items: center; gap: 6px;
+  font-family: var(--font-mono);
+  font-size: 9px; letter-spacing: 0.1em;
+  color: var(--steel);
+  margin-bottom: 6px;
+}
+.ovc-dot { width: 3px; height: 3px; background: var(--steel); border-radius: 50%; }
+
+.ovc-progress {
+  height: 2px;
+  background: rgba(255, 255, 255, 0.06);
+  overflow: hidden;
+}
+.ovc-progress-fill {
+  width: 100%; height: 100%;
+  background: var(--tier);
+  transform-origin: right center;
+  animation: ovcShrink 10s linear forwards;
+  box-shadow: 0 0 6px var(--tier);
+}
+@keyframes ovcShrink {
+  from { transform: scaleX(1); }
+  to   { transform: scaleX(0); }
+}
+
+/* Placement toolbar — only visible during drag-to-place mode. */
+.placement-toolbar {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 6px 7px;
+  background: rgba(10, 14, 20, 0.92);
+  border: 1px solid var(--amber);
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.6), 0 0 12px rgba(255, 170, 51, 0.25);
+}
+
+.pt-hint {
+  font-family: var(--font-mono);
+  font-size: 7px;
+  letter-spacing: 0.18em;
+  color: var(--amber);
+  text-align: center;
+}
+
+.pt-buttons {
+  display: flex;
+  gap: 6px;
+}
+
+.pt-btn {
+  flex: 1;
+  padding: 4px 8px;
+  font-family: var(--font-mono);
+  font-size: 8px;
+  font-weight: 600;
+  letter-spacing: 0.12em;
+  border: 1px solid currentColor;
+  background: rgba(0, 0, 0, 0.4);
+  cursor: pointer;
+  transition: background 120ms ease, color 120ms ease;
+}
+.pt-save   { color: #3effa1; }
+.pt-cancel { color: #ff6b6b; }
+.pt-save:hover   { background: rgba(62, 255, 161, 0.15); }
+.pt-cancel:hover { background: rgba(255, 107, 107, 0.15); }

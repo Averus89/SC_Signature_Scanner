@@ -2,6 +2,65 @@
 
 ---
 
+## Active: v6.0.0 — Webview UI Migration (branch `feat/webview-migration`)
+
+Replacing the tkinter UI with a React console hosted in pywebview, in six vertical-slice phases. Each phase is shippable on its own; tkinter `main.py` remains runnable in parallel until phase 6.
+
+### Migration Phase 1 — Scaffold + Scanner Panel ✓ COMPLETE
+- [x] Add `pywebview` to `requirements.txt`; install in venv
+- [x] Move Designer's `Project Rockfinder/*.jsx` + `styles.css` + `index.html` to `ui/main/`; drop `tweaks-panel.jsx`
+- [x] Strip tweaks UI from `app.jsx`; gate non-scanner radial nav buttons
+- [x] `bridge.py` — `js_api` for scanner panel (folder picker, start/stop monitoring, test detection)
+- [x] `app_webview.py` — splash → pywebview window entry point
+- [x] Wire scanner panel JSX to bridge; expose `window.onDetection` for Python pushes
+- [x] Frameless window + drag region + min/close controls
+- [x] Remove `body::before` vignette (was washing content)
+- [x] Manual verification: splash, drag, BROWSE, ENGAGE, HALT, PING, real screenshot detection
+- [x] Version bump → `5.1.0.dev1`
+
+### Migration Phase 2 — Settings Panel ✓ COMPLETE
+- [x] Bridge methods: `get_settings`, `save_settings`, `pick_debug_folder`
+- [x] Persist to existing `config.json` schema (compatibility with current tkinter app)
+- [x] Camel/snake + percent/float schema translation in the bridge
+- [x] 200 ms debounced save on every change
+- [x] Wire `<SettingsPanel>` JSX to bridge
+- [x] Enable `SETTINGS` radial nav button
+- [x] Cache-bust JSX + CSS in `index.html` so WebView2 always picks up changes
+- [x] Version bump → `5.1.0.dev2`
+- [ ] Deferred to Phase 3: `pick_overlay_position` (needs live tk root or webview overlay window)
+- [ ] Deferred to Phase 3: `test_overlay` button (same constraint)
+
+### Migration Phase 3 — Overlay Window
+- [ ] Second `webview.create_window()` for the in-game overlay popup
+- [ ] Frameless, topmost, transparent, positioned at saved `(x, y)`
+- [ ] `ui/overlay/` JSX subfolder with mineral-tier-aware match render
+- [ ] Auto-hide after `duration` seconds
+- [ ] Replace `overlay.py` (`OverlayPopup`, `PositionAdjuster`)
+- [ ] Enable `HUD` radial nav button (live overlay preview)
+
+### Migration Phase 4 — Region Selector
+- [ ] Fullscreen frameless transparent webview for drag-rect picking
+- [ ] Bridge: `start_region_selector()`, `save_region(rect)`
+- [ ] Replace `region_selector.py`
+- [ ] Enable `REGION` radial nav button
+
+### Migration Phase 5 — Index / Codex Panel
+- [ ] Bridge: `get_signature_index()` returning the real Python DB grouped by tier
+- [ ] Replace `data.jsx` mock with bridge-fetched data
+- [ ] Live highlight of the latest scanned signature in the index
+- [ ] Enable `INDEX` radial nav button
+- [ ] Drop the JS-side `lookupSignature` mock — match payloads come from Python
+
+### Migration Phase 6 — Packaging + tkinter Removal
+- [ ] Update `SC_Signature_Scanner.spec` for pywebview + `ui/` assets bundling
+- [ ] WebView2 runtime detection with graceful fallback message
+- [ ] Verify exe on a clean Win10/11 machine
+- [ ] Delete `main.py`, `overlay.py`, `region_selector.py`, `theme.py`, `splash.py` (replace splash with webview splash if Designer delivers one)
+- [ ] Bump version `5.1.0.devN` → `6.0.0`
+- [ ] Update `README.md` for the new architecture and runtime requirement
+
+---
+
 ## Planned: Full Security & Quality Pass → v5.0.0 Release
 
 Same pipeline as ShaderCacheNuke v3.0.0. Work through each phase in order.
@@ -255,12 +314,26 @@ ROC or FPS mining. 100% single mineral per cluster.
 - [ ] Add rare asteroid variants to overlay UI (they display generically now)
 - [ ] In-game verification: confirm rare asteroid signatures are visible on HUD (3540-3600)
 - [ ] GPU acceleration option for OCR (currently CPU-only)
-- [ ] **Investigate Windows OCR (WinRT) as EasyOCR replacement**
-  - Windows OCR is purpose-built for clean screen/UI text; EasyOCR is optimised for natural scene text (photos)
-  - Expected benefits: faster startup (no 3–5s model load, no 115MB download), faster per-scan, potentially better digit accuracy on HUD fonts
-  - App is already Windows-only so no portability penalty
-  - Python access via `winrt` package (`winrt-Windows.Media.Ocr`)
-  - Approach: implement as a second OCR backend, A/B test against EasyOCR on real SC screenshots before committing to a swap
+- [x] **Windows OCR (WinRT) as primary, EasyOCR fallback** — DONE (2026-04-30)
+  - Implemented in `scanner.py::_WindowsOcrBackend` using `winrt-Windows.Media.Ocr`
+  - Scanner picks Windows OCR at construction when `en-US` profile is supported; falls back to EasyOCR otherwise
+  - EasyOCR import is now lazy so torch DLL failures degrade gracefully
+  - Confidence not exposed by Windows.Media.Ocr.OcrResult — UI shows `—` instead of fabricating a value
+- [ ] **Replace screenshot-file scanning with live screen capture**
+  - Today: user (or a hotkey) saves a screenshot to disk → watchdog notices → scanner OCRs the file → match displays
+  - Drawbacks of file-based flow: clutters the screenshots folder, requires manual capture or auto-screenshot config, ~50–200ms file IO per scan, can't run continuously
+  - Goal: capture the screen directly in-process at a low rate (≈1–2 fps), crop to the existing `scan_region.json` bbox (already in screen-pixel coords), OCR the numpy array, push detections live
+  - Capture API options:
+    1. **`Windows.Graphics.Capture` (WinRT) on the monitor** — `GraphicsCaptureItem.create_from_monitor_handle(hMonitor)`. Modern, hardware-accelerated, no special permissions. Already accessible via the `winrt-*` packages we use for OCR (one more pip add: `winrt-Windows.Graphics.Capture`).
+    2. **DXGI Output Duplication** — slightly faster full-screen capture; lower-level. Fallback if `GraphicsCapture` proves unsuitable.
+    3. **`PrintWindow` / `BitBlt`** — unreliable on hardware-accelerated game windows; skip.
+  - Anti-cheat: not a real concern. We capture the **screen**, not the game process — same thing every screenshot tool does at the OS level. EAC is concerned with memory reads, DLL injection, and kernel hooks, none of which apply. Still worth a quick smoke test against a live SC session before shipping, just to be safe.
+  - **Display mode requirement: borderless windowed (hard requirement).** Already documented in the UI ticker for the overlay's sake; live capture inherits the same requirement. Exclusive fullscreen vs borderless is no longer a real tradeoff in 2026 — modern users run borderless because exclusive breaks OBS, Discord, screen-share, and any on-top overlay (including ours). Don't burn effort designing around exclusive fullscreen; if a user is on it, surface a clear "switch to borderless" message and stop there.
+  - Open considerations:
+    - **Capture cadence** — 1–2 fps OCR is plenty; gate the loop so it pauses when SC isn't the foreground window (no point scanning the desktop)
+    - **Multi-monitor** — `scan_region.json` stores screen-pixel coords. If the user moves SC to a different monitor, the saved region might point at the wrong display. Either store monitor-relative coords or detect-and-warn
+    - **Region picker stays as-is** — `region_selector.py` keeps using a saved screenshot to draw the bbox; that workflow already produces screen-pixel coords which are exactly what live capture needs
+  - Migration path: keep the screenshot-folder watcher as an opt-in fallback while live-capture is bedded in; don't rip out `monitor.py` until the new flow is verified across patches
 - [ ] **Ship identification by size/performance class** — DEFERRED until SC scanner rework ships
   - Concept: use CS value to identify size class (Small/Medium/Large/XL/Capital), EM+IR ratio for performance class (Competition/Stealth/Military/Industrial)
   - Approach: one wide scan region captures all three HUD values (IR | EM | CS, left to right); EasyOCR bounding boxes identify which is which by horizontal position

@@ -4,7 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>SC Signature Scanner — Real-Time Target ID for Star Citizen</title>
-  <meta name="description" content="Instantly identify asteroids, ground deposits, and salvage targets in Star Citizen. OCR-powered overlay tool — free, open source." />
+  <meta name="description" content="Real-time signature ID for Star Citizen. EasyOCR-powered tier-colored in-game overlay. Free, open source, no install." />
   <style>
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
@@ -690,27 +690,29 @@
   <div class="hero">
     <div class="container">
       <div class="hero-eyebrow">
-        ✦ Star Citizen 4.7+ &nbsp;·&nbsp; Free &amp; Open Source
+        ✦ Star Citizen 4.7+ &nbsp;·&nbsp; Version 6.0 &nbsp;·&nbsp; Free &amp; Open Source
       </div>
       <h1>
         Know Your Target<br>
         <span class="highlight">Before You Mine It</span>
       </h1>
       <p class="hero-sub">
-        Screenshot your targeting HUD. SC Signature Scanner reads the signature,
-        matches it to the database, and overlays the result in-game — in seconds.
+        Drop a screenshot in your watched folder. SC Signature Scanner reads the
+        HUD signature with EasyOCR, matches it against a database extracted
+        from <code>Game2.dcb</code>, and floats a tier-colored card over the
+        game — automatically.
       </p>
       <div class="hero-actions">
-        <a class="btn-primary" href="https://github.com/Diftic/SC_Signature_Scanner/releases/latest/download/SC_Signature_Scanner.exe">
+        <a class="btn-primary" href="https://github.com/Diftic/SC_Signature_Scanner/releases/latest">
           <svg viewBox="0 0 16 16"><path d="M7.47 10.78a.75.75 0 0 0 1.06 0l3.75-3.75a.75.75 0 0 0-1.06-1.06L8.75 8.44V1.75a.75.75 0 0 0-1.5 0v6.69L4.78 5.97a.75.75 0 0 0-1.06 1.06l3.75 3.75ZM3.75 13a.75.75 0 0 0 0 1.5h8.5a.75.75 0 0 0 0-1.5h-8.5Z"/></svg>
-          Download v5.0.0
+          Download v6.0
         </a>
         <a class="btn-secondary" href="https://github.com/Diftic/SC_Signature_Scanner" target="_blank">
           <svg viewBox="0 0 16 16"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0 0 16 8c0-4.42-3.58-8-8-8Z"/></svg>
           View on GitHub
         </a>
       </div>
-      <p class="hero-meta">Windows 10 / 11 &nbsp;·&nbsp; ~242 MB &nbsp;·&nbsp; No install required</p>
+      <p class="hero-meta">Windows 10 / 11 &nbsp;·&nbsp; ~245 MB &nbsp;·&nbsp; No install &nbsp;·&nbsp; No subscriptions</p>
     </div>
   </div>
 
@@ -746,17 +748,17 @@
       <p class="showcase-label">See it in action</p>
       <div class="screenshot-grid">
         <div class="screenshot-frame">
-          <img src="Images/Ingame function.png" alt="SC Signature Scanner overlay shown in-game" />
-          <div class="screenshot-caption">In-game overlay — identified target with tier, mineral, and mining method</div>
+          <img src="Images/Main%20page.png" alt="Scanner module — Target Profile, Monitor Control, Detection Log" />
+          <div class="screenshot-caption">Scanner module — reveal card, monitor control, and the new time/type/count/classification/sig log</div>
         </div>
         <div class="screenshot-bottom">
           <div class="screenshot-frame">
-            <img src="Images/Mainpage.png" alt="Main application window" />
-            <div class="screenshot-caption">Main window — monitoring status and scan log</div>
+            <img src="Images/Popup%20overlay.png" alt="In-game overlay popup" />
+            <div class="screenshot-caption">In-game overlay — tier-colored card with mineral, qualifier, cross-section, and a duration progress bar</div>
           </div>
           <div class="screenshot-frame">
-            <img src="Images/Settings.png" alt="Settings tab" />
-            <div class="screenshot-caption">Settings — scan region, screenshot folder, overlay options</div>
+            <img src="Images/Signature%20overview.png" alt="Signature index module" />
+            <div class="screenshot-caption">Index module — full DB browseable by class and tier, hydrated live from Python</div>
           </div>
         </div>
       </div>
@@ -774,44 +776,49 @@
       </div>
       <div class="feature-grid">
         <div class="feature-card">
-          <div class="feat-icon">📸</div>
-          <h3>Auto Screenshot Monitoring</h3>
-          <p>Watches your SC screenshot folder. Every new screenshot is scanned automatically — no hotkeys or manual steps.</p>
+          <div class="feat-icon">🧠</div>
+          <h3>Deep-learning OCR</h3>
+          <p>EasyOCR with morphological noise filtering reads the signature value from your HUD reliably across all UI scales. Confidence reported per detection.</p>
         </div>
         <div class="feature-card">
-          <div class="feat-icon">🧠</div>
-          <h3>Deep Learning OCR</h3>
-          <p>EasyOCR with morphological noise filtering extracts the signature value from your HUD accurately across all HUD scales.</p>
+          <div class="feat-icon">📸</div>
+          <h3>Auto screenshot monitoring</h3>
+          <p>Watches your SC screenshot folder. Every new screenshot is scanned automatically — no hotkeys, no manual steps. Drop a file, see a result.</p>
         </div>
         <div class="feature-card">
           <div class="feat-icon">🪨</div>
-          <h3>Ship Mining</h3>
-          <p>Identifies the dominant mineral tier — Legendary, Epic, Rare, Uncommon, or Common — directly from the signature value.</p>
+          <h3>Per-mineral identification</h3>
+          <p>SC 4.7+ system: signature identifies the dominant mineral and its tier (Legendary → Common) directly. Result lands in the reveal card and the in-game overlay simultaneously.</p>
         </div>
         <div class="feature-card">
           <div class="feat-icon">⛏️</div>
-          <h3>Ground Deposits</h3>
-          <p>Distinguishes FPS hand-mining rocks (3000) from ROC and vehicle-class deposits (4000) with 100% single-mineral purity.</p>
+          <h3>Ground deposits</h3>
+          <p>Distinguishes FPS hand-mining rocks (3000) from ROC and vehicle-class deposits (4000), with 100% single-mineral purity. Multi-cluster maths handled (Nx).</p>
         </div>
         <div class="feature-card">
           <div class="feat-icon">🔧</div>
-          <h3>Salvage &amp; Wreck Debris</h3>
-          <p>Hull panels, and sized wreck debris from Avenger-class right up to 890 Jump capital wrecks.</p>
+          <h3>Salvage &amp; wreck debris</h3>
+          <p>Hull panels (2000 × N), and sized debris from Avenger-class through 890 Jump capital wrecks. The reveal card surfaces the count, not just the base signature.</p>
         </div>
         <div class="feature-card">
           <div class="feat-icon">🖥️</div>
-          <h3>In-Game Overlay</h3>
-          <p>Always-on-top popup with the match result. Drag to reposition. Configurable display duration.</p>
+          <h3>Live overlay window</h3>
+          <p>Standalone always-on-top webview, frameless and tier-colored. PLACE OVERLAY in Settings drops the live card onto your game; drag to position; click SAVE.</p>
         </div>
         <div class="feature-card">
           <div class="feat-icon">📐</div>
-          <h3>One-Time Calibration</h3>
-          <p>Draw a box over the signature HUD element once in Settings. Scanner uses that region on every screenshot thereafter.</p>
+          <h3>One-time region calibration</h3>
+          <p>Open a screenshot, drag a box over the in-game signature value, click Save. Coordinates persist; the scanner reads only that rectangle every screenshot thereafter.</p>
+        </div>
+        <div class="feature-card">
+          <div class="feat-icon">📚</div>
+          <h3>Built-in signature codex</h3>
+          <p>The Index module is a live view of the same DB the scanner uses. Browse by class (Ship / Ground / Salvage) and tier; see exactly what each signature decodes to.</p>
         </div>
         <div class="feature-card">
           <div class="feat-icon">🔄</div>
-          <h3>Auto-Update Check</h3>
-          <p>Checks GitHub for new releases on startup and offers a direct download link when one is available.</p>
+          <h3>One-click update check</h3>
+          <p>The About module's CHECK FOR UPDATES button hits GitHub Releases. Validates the response URL against an allowlist before surfacing a download link.</p>
         </div>
       </div>
     </section>
@@ -826,23 +833,23 @@
       <div class="steps">
         <div class="step-card">
           <div class="step-num">1</div>
-          <h3>Configure scan region</h3>
-          <p>Take one screenshot with a signature visible. In Settings, draw a box over the signature area. Saved permanently.</p>
+          <h3>Calibrate the scan region</h3>
+          <p>Open <strong>REGION</strong>, click <strong>PICK REGION</strong>, choose a screenshot, drag a box over the signature value, save. Coordinates persist across sessions.</p>
         </div>
         <div class="step-card">
           <div class="step-num">2</div>
-          <h3>Point to your screenshot folder</h3>
-          <p>Set the path to your Star Citizen screenshot folder and click Start Monitoring.</p>
+          <h3>Place the overlay</h3>
+          <p>Open <strong>SETTINGS</strong>, click <strong>PLACE OVERLAY</strong>. The live card appears on top of the game; drag it where you want, click <strong>SAVE</strong>.</p>
         </div>
         <div class="step-card">
           <div class="step-num">3</div>
-          <h3>Press PrintScreen in-game</h3>
-          <p>When a signature appears on your targeting HUD, take a screenshot. The scanner detects it automatically.</p>
+          <h3>Engage monitoring</h3>
+          <p>In <strong>SCANNER</strong>, point the screenshot folder at your SC screenshots directory and click <strong>ENGAGE</strong>. The watchdog now triggers on every new file.</p>
         </div>
         <div class="step-card">
           <div class="step-num">4</div>
-          <h3>Read the overlay</h3>
-          <p>An always-on-top popup appears with the identification — mineral, tier, and recommended mining method.</p>
+          <h3>PrintScreen in-game</h3>
+          <p>When a signature is on your HUD, take a screenshot. The reveal card and the in-game overlay both update with the matched mineral, tier, and count — in milliseconds.</p>
         </div>
       </div>
     </section>
@@ -965,11 +972,15 @@
         </div>
         <div class="limit-card">
           <strong>Display mode</strong>
-          Star Citizen must be in Windowed or Borderless Windowed mode for the overlay to appear over the game window.
+          Star Citizen must be in <strong>Windowed</strong> or <strong>Borderless Windowed</strong> mode. Exclusive fullscreen blocks always-on-top overlays.
+        </div>
+        <div class="limit-card">
+          <strong>WebView2 runtime</strong>
+          The UI runs on Microsoft Edge WebView2. It's preinstalled on Windows 10 1903+ and all of Windows 11. If you're on an older build, install it from Microsoft.
         </div>
         <div class="limit-card">
           <strong>First-run model download</strong>
-          EasyOCR downloads ~115 MB of model files on first launch. Subsequent startups use the local cache and are fast.
+          EasyOCR downloads ~115 MB of model files on first launch (cached to <code>~/.EasyOCR/model/</code>). Subsequent startups use the local cache.
         </div>
       </div>
     </section>
@@ -984,7 +995,7 @@
         <pre><code>git clone https://github.com/Diftic/SC_Signature_Scanner.git
 cd SC_Signature_Scanner
 pip install -r requirements.txt
-python main.py</code></pre>
+python app_webview.py</code></pre>
         <div class="source-notes">
           <div class="source-note-item">
             <span class="snl">1</span>
@@ -992,15 +1003,15 @@ python main.py</code></pre>
           </div>
           <div class="source-note-item">
             <span class="snl">2</span>
-            <p>Install <strong>PyTorch CPU build</strong> before running pip install. See the comments in <code>requirements.txt</code>.</p>
+            <p>The UI runs in <strong>pywebview</strong> on Microsoft Edge WebView2 — no Node toolchain, no build step. JSX is compiled in-browser via babel-standalone.</p>
           </div>
           <div class="source-note-item">
             <span class="snl">3</span>
-            <p>EasyOCR model files (~115 MB) download automatically on first run into <code>~/.EasyOCR/model/</code>.</p>
+            <p>Install <strong>PyTorch CPU build</strong> before running pip install. EasyOCR downloads ~115 MB to <code>~/.EasyOCR/model/</code> on first run.</p>
           </div>
           <div class="source-note-item">
             <span class="snl">4</span>
-            <p>Run <code>python build.py</code> to produce a standalone <code>.exe</code> using PyInstaller.</p>
+            <p>Run <code>python build.py</code> to produce a standalone one-folder bundle using PyInstaller (~245 MB zipped).</p>
           </div>
         </div>
       </div>

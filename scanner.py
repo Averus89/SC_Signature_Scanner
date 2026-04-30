@@ -5,10 +5,9 @@ Detects signature values from Star Citizen screenshots using OCR.
 
 Requires a scan region to be configured in Settings.
 
-OCR Engine: EasyOCR (deep learning based)
-- First run downloads ~115MB of model files
-- Subsequent runs use cached models locally
-- No external binary dependencies
+OCR engine: EasyOCR (deep learning).
+- ~115 MB model download on first run (cached to ~/.EasyOCR/model/).
+- Loads on a background thread during the splash so app boot stays smooth.
 """
 
 import json
@@ -25,22 +24,20 @@ import paths
 
 import region_selector
 
-# EasyOCR import - lazy initialization
-HAS_EASYOCR = False
-EASYOCR_ERROR = None
-
 # Pillow 10.0.0+ removed ANTIALIAS, but EasyOCR still uses it
-# Add compatibility shim before importing easyocr
 import PIL.Image
 if not hasattr(PIL.Image, 'ANTIALIAS'):
     PIL.Image.ANTIALIAS = PIL.Image.Resampling.LANCZOS
 
+HAS_EASYOCR = False
+EASYOCR_ERROR: Optional[str] = None
+
 try:
     import easyocr
     HAS_EASYOCR = True
-except ImportError as e:
+except (ImportError, OSError) as e:
     EASYOCR_ERROR = str(e)
-    print(f"Warning: EasyOCR not installed. OCR disabled. Error: {e}")
+    print(f"Warning: EasyOCR not available. OCR disabled. Error: {e}")
 
 # Signature validity range
 MIN_SIGNATURE = 100
@@ -65,17 +62,20 @@ class SignatureScanner:
     def __init__(self, db_path: Path):
         self.db = self._load_database(db_path)
         self._build_lookups()
-        
+
         self.debug_mode = False
         self.debug_dir = paths.get_debug_path()
         self.last_debug_info = {}
         self._debug_prefix = ""  # Timestamp prefix for debug files
-        
-        # EasyOCR reader - lazily initialized on first use
+
+        self.engine_name: str = "EasyOCR"
+
+        # EasyOCR reader - lazily initialized on first use (the splash
+        # masks the load via a background thread).
         self._ocr_reader: Optional[Any] = None  # easyocr.Reader when available
         self._ocr_initialized = False
         self._ocr_init_error: Optional[str] = None
-        
+
         # Callback for model download progress (set by UI)
         self.on_model_download_start: Optional[Callable[[], None]] = None
         self.on_model_download_complete: Optional[Callable[[], None]] = None
@@ -93,20 +93,20 @@ class SignatureScanner:
         """
         if self._ocr_initialized:
             return self._ocr_reader
-        
+
         if not HAS_EASYOCR:
             self._ocr_init_error = EASYOCR_ERROR or "EasyOCR not installed"
             self._ocr_initialized = True
             return None
-        
+
         try:
             # Notify UI that download may start
             if self.on_model_download_start:
                 self.on_model_download_start()
-            
+
             if self.debug_mode:
                 print("[DEBUG] Initializing EasyOCR reader...")
-            
+
             # Initialize reader
             # - gpu=False: Use CPU (works everywhere, GPU auto-detected if available)
             # - verbose=False: Suppress download progress to stdout
@@ -134,16 +134,16 @@ class SignatureScanner:
     
     def is_ocr_available(self) -> Tuple[bool, Optional[str]]:
         """Check if OCR is available.
-        
+
         Returns:
             Tuple of (is_available, error_message)
         """
         if not HAS_EASYOCR:
             return False, EASYOCR_ERROR or "EasyOCR not installed"
-        
+
         if self._ocr_initialized and self._ocr_init_error:
             return False, self._ocr_init_error
-        
+
         return True, None
     
     def _debug_path(self, filename: str) -> Path:
@@ -185,7 +185,12 @@ class SignatureScanner:
             self.last_debug_info['image_size'] = (width, height)
             
             if self.debug_mode:
-                self.debug_dir.mkdir(exist_ok=True)
+                try:
+                    self.debug_dir.mkdir(parents=True, exist_ok=True)
+                    print(f"[DEBUG] Writing debug output to: {self.debug_dir}")
+                except OSError as e:
+                    print(f"[DEBUG] Could not create debug dir {self.debug_dir}: {e}")
+                    raise
                 img.save(self._debug_path("00_original.png"))
                 self.last_debug_info['debug_files'].append(f"{self._debug_prefix}00_original.png")
             
@@ -268,7 +273,7 @@ class SignatureScanner:
             with open(self._debug_path("99_summary.txt"), 'w') as f:
                 f.write(f"Method: {method}\n")
                 f.write(f"Region: ({x1}, {y1}) - ({x2}, {y2})\n")
-                f.write(f"OCR engine: EasyOCR\n")
+                f.write(f"OCR engine: {self.engine_name}\n")
                 f.write(f"OCR text: {ocr_text}\n")
                 f.write(f"OCR confidence: {confidence:.2f}\n")
                 f.write(f"Signatures found: {signatures}\n")
@@ -471,17 +476,14 @@ class SignatureScanner:
     
     def _ocr_signature(self, img_array: np.ndarray) -> Tuple[List[int], str, float]:
         """OCR the image and extract signature numbers.
-        
-        Args:
-            img_array: RGB numpy array to OCR
-        
+
         Returns:
-            Tuple of (list of signature values, raw OCR text, confidence)
+            Tuple of (list of signature values, raw OCR text, mean confidence 0..1).
         """
         reader = self._get_ocr_reader()
         if reader is None:
             return [], f"OCR ERROR: {self._ocr_init_error}", 0.0
-        
+
         try:
             # EasyOCR with digit allowlist for maximum accuracy
             # Note: Comma removed from allowlist - was causing misreads like "7,480" -> "7,4480"
@@ -492,29 +494,29 @@ class SignatureScanner:
                 paragraph=False,  # Don't merge into paragraphs
                 detail=1,  # Return bounding boxes + confidence
             )
-            
+
             if self.debug_mode:
                 print(f"[DEBUG] EasyOCR raw results: {results}")
-            
+
             # Extract text and confidence
             texts = []
             confidences = []
-            
+
             for detection in results:
                 # detection = (bbox, text, confidence)
                 if len(detection) >= 3:
                     bbox, text, conf = detection[0], detection[1], detection[2]
                     texts.append(text)
                     confidences.append(conf)
-            
+
             combined_text = ' '.join(texts)
             avg_confidence = sum(confidences) / len(confidences) if confidences else 0.0
-            
+
             # Extract signature values
             signatures = self._extract_signatures(combined_text)
-            
+
             return signatures, combined_text, avg_confidence
-            
+
         except Exception as e:
             return [], f"OCR ERROR: {e}", 0.0
     

@@ -49,6 +49,234 @@ The devlog shall always contain a clear "Current Status" or "Next Steps" section
 
 ## Changelog
 
+### 2026-04-30 — v5.1.0.dev7: Windows OCR primary, EasyOCR fallback + UI polish
+
+Branch `feat/webview-migration`. Two streams of work landed together:
+
+**1. Windows OCR backend (primary).** Added a new `_WindowsOcrBackend` to `scanner.py` that wraps `Windows.Media.Ocr` via the modular `winrt-*` Python packages. The scanner picks Windows OCR at construction when the `en-US` profile is supported; falls back to EasyOCR otherwise. Windows OCR is faster (no model download, ~50ms per scan vs EasyOCR's 200ms+) and far better on clean UI digits than EasyOCR — which is optimised for natural-scene text rather than HUD glyphs.
+
+**Lazy EasyOCR import.** The eager `import easyocr` at module load was crashing the app with `OSError [WinError 1114]` on systems where torch's native DLLs fail to initialise. Moved the import behind `_try_import_easyocr()` (deferred to first scan that actually needs it), broadened the catch from `ImportError` to `(ImportError, OSError)`, and skipped it entirely when Windows OCR is the active backend.
+
+**Confidence honesty.** Windows.Media.Ocr.OcrResult exposes no confidence number, so `_ocr_signature_windows` returns `None` for confidence rather than fabricating a 1.0. The chain (`scan_image` → `ocr_confidence` → `payload.ocrConfidence`) preserves None all the way to React, where the reveal card shows `—` instead of a misleading `100%`.
+
+**Files modified for OCR backend:**
+- `scanner.py` — new `_WindowsOcrBackend` class; `__init__` picks the active backend and sets `engine_name`; `_ocr_signature` dispatches; `is_ocr_available` knows about both; lazy `_try_import_easyocr`; debug-output formatting handles `confidence=None`.
+- `requirements.txt` — added `winrt-runtime` + per-namespace packages (`Media.Ocr`, `Globalization`, `Graphics.Imaging`, `Storage.Streams`, `Foundation`, `Foundation.Collections`); demoted EasyOCR to fallback.
+- `bridge.py` — `get_initial_state` returns `ocrEngine` from `scanner.engine_name`.
+- `SC_Signature_Scanner.spec` — added `winrt` hidden imports + `collect_submodules('winrt')`.
+- `ui/main/app.jsx` — bootstrap stores `ocrEngine`, passes to `SettingsPanel`.
+- `ui/main/module-panels.jsx` — Settings shows the live engine name, no longer hardcoded `"EasyOCR"`.
+- `TODO.md` — Windows OCR investigation marked done.
+
+**2. UI polish.**
+
+- **Detection log reorder.** Was `time | tier | name | sig` and prone to text overlapping at narrow widths. Now `time | type | count | classification | sig` with each cell `min-width: 0` + `text-overflow: ellipsis` so long mineral names truncate cleanly. Bridge surfaces `nameOnly` (name + tier subtitle, no count) and `count` so each column has its own field.
+- **CONF readout.** The Target Profile's `DELTA / ±0` cell was always meaningless (Python's matches always return `signature == base × count` exactly). Replaced with `CONF / NN%` showing OCR confidence. `app.jsx::onDetection` now threads `payload.ocrConfidence` through to the entry. With Windows OCR the value is `null` → renders as `—`; with EasyOCR it's a real percentage.
+- **Overlay polish (continuation of Phase 6 era).**
+  - Dropped `transparent=True` on the overlay window — WebView2's transparency was producing visible composition artifacts (a "dislocated backdrop" effect at non-100% scale). Window is now opaque with `background_color="#0a0e14"` matching the card's bottom-gradient color, so any leftover empty area inside the window is the same dark color as the card edges and visually disappears.
+  - JS-driven auto-hide replaces the previous `threading.Timer` approach that didn't reliably dispatch `Window.hide()` from a non-main thread.
+  - `instance` counter forces React to remount `OverlayCard` on every new payload so the progress-bar CSS animation restarts (was only running on first show).
+  - Live scale propagation in `save_settings`: when the slider moves and the overlay is visible, the bridge resizes the window and re-pushes the last payload with the new scale so the card updates without waiting for the next detection. Hidden-window `move()` no longer side-effects the window into visibility (only fires when X or Y truly changed).
+  - Placement toolbar shrunk ~30% (padding/font/gaps multiplied by 0.7), with matching tighter window dims (`_OVERLAY_BASE_W = 272`, `_OVERLAY_BASE_H = 152`, `_OVERLAY_PLACEMENT_BASE_H = 200`).
+
+- **Display-match shape extended.** `_to_display_match` now includes `nameOnly`, `count`, and `sig` alongside the existing `name`/`nameMain`/`nameSubtitle`/`tier`/`cat`/`notes`. Lets the React side compose the new log columns and CONF readout cleanly.
+
+**Version:** `5.1.0.dev6` → `5.1.0.dev7`.
+
+**Verified manually:** Windows OCR active by default (Settings shows `OCR ENGINE: Windows OCR`); Torite ×3 / Large Wreck Debris ×3 both resolve correctly; overlay scaling no longer produces dislocated backdrop; placement toolbar fits cleanly; detection log columns align with no text overlap.
+
+**Future work flagged in TODO:** screen-capture replacement for screenshot-file scanning (uses `Windows.Graphics.Capture` on the monitor; borderless windowed required, exclusive fullscreen explicitly out of scope).
+
+---
+
+### 2026-04-30 — v5.1.0.dev6: Webview UI migration · Phase 6 (packaging cleanup)
+
+Branch `feat/webview-migration`. The legacy tkinter app is gone. With Phases 1–5 verified and the webview UI fully covering the feature surface (scanner, settings, overlay, region picker, real DB matches), the tk codepath is dead weight. Phase 6 removes it from the tree and points the PyInstaller build at `app_webview.py`.
+
+**Files deleted:**
+- `main.py` — full tkinter UI (~1600 lines). Replaced by `app_webview.py` + `bridge.py` + the React UI under `ui/main/`.
+- `theme.py` — `RegolithTheme`, `WarningBanner`, `UpdateBanner`, `StatusIndicator`. Only consumed by `main.py` and `overlay.py`.
+- `overlay.py` — `OverlayPopup` + `PositionAdjuster` (legacy tk overlay). Replaced by `ui/overlay/`.
+
+**Files retained but worth noting:**
+- `region_selector.py` — still imported by `bridge.pick_region`. Plan was to inline/port to webview-native in this phase, but Phase 4 verified the existing tk picker works and rewriting it is throwaway work for a future phase. `PIL._tkinter_finder` and tkinter stay in the bundle for it (and for `splash.py`).
+
+**`SC_Signature_Scanner.spec`:**
+- Entry script `main.py` → `app_webview.py`.
+- `datas` extended with `ui/main/` and `ui/overlay/` so PyInstaller bundles the React UI into the frozen exe (otherwise `paths.get_base_path() / "ui" / ...` won't find the HTML/JSX/CSS).
+- `hiddenimports` adds `webview`, `webview.platforms.edgechromium`, plus `collect_submodules('webview')`.
+
+**`build.py`:**
+- Pre-build sanity check switched from `main.py` to `app_webview.py`.
+- `required_files` updated: drops `main.py`, `theme.py`, `overlay.py`; adds `app_webview.py`, `bridge.py`, `ui/main/index.html`, `ui/overlay/index.html`.
+
+**`README.md`:** `python main.py` → `python app_webview.py`.
+
+**Version:** `5.1.0.dev5` → `5.1.0.dev6`.
+
+**Verified manually:** Pending — frozen exe build via `python build.py` next session. Items to verify: PyInstaller picks up the new entry; the bundled exe finds and loads `ui/main/index.html`; WebView2 dependency resolves; OCR + region selector + overlay all work in the frozen build.
+
+**Out of scope (deferred):**
+- Webview-native rewrite of the region selector (so we can drop `region_selector.py` and tkinter entirely). Tracked as a future phase.
+- Removing the `dist/` directory at the repo root (it's a stale frozen build from before Phase 6 — in `.gitignore` already).
+- README update for the broader Settings/Usage section that still describes the tkinter-era flow.
+
+---
+
+### 2026-04-30 — v5.1.0.dev5: Webview UI migration · Phase 5 (real signature DB)
+
+Branch `feat/webview-migration`. The React UI now uses Python's signature database as the single source of truth. Phase 1 left `ui/main/data.jsx` as a hardcoded JS mock containing only ship-mining minerals — ground deposits and salvage debris fell through to `NO LOCK` in the reveal card even though `scanner.match_signature` was correctly identifying them. Phase 5 wires the real DB into the React layer.
+
+**Architecture decision — option B-full (hydrate JS tables from Python + prefer Python's matches per detection):**
+The bridge now exposes `get_signature_db()` returning `{minerals, ground, salvage}` shaped to mirror the codex display contract, populated from the live `SignatureScanner` instance. On bootstrap, app.jsx hydrates `window.MINERALS / GROUND / SALVAGE / ALL_SIGNATURES` from that response. Per-detection: `_build_detection_payload` runs every match through `_to_display_match` so `payload.matches` is already React-shaped (`{name, tier, cat, notes}`); `app.jsx::ingestSig` uses `payload.matches[0]` when present, falling back to `lookupSignature` only when Python returned nothing. The fallback path matters because `lookupSignature` is naive flat-tolerance — it can't recognize signatures like `count × base` (ground deposits, salvage debris). Python's `match_signature` does the modulo math and surfaces correct matches; React just renders.
+
+**Files modified:**
+- `bridge.py` — new method `get_signature_db()` builds React-shaped tables from `scanner.minable_signatures` / `ground_deposit_*_base` / `salvage_per_panel` / `salvage_debris_types`. New static `_to_display_match(py_match)` translates Python match dicts (`{type, category, name, tier, variant, ...}`) to React match dicts (`{name, tier, cat, notes}`). `_build_detection_payload` now exposes `matches` (display-shaped) and `rawMatches` (Python-shaped, kept in case the UI grows uses for confidence/count). `_build_overlay_payload` simplified — `matches[0]` is already display-shaped.
+- `ui/main/data.jsx` — hardcoded `MINERALS`/`GROUND`/`SALVAGE`/`ALL_SIGNATURES`/`SAMPLE_STREAM` arrays removed. Only `TIERS` (presentational metadata) and `lookupSignature` (fallback) remain. `lookupSignature` now reads `window.ALL_SIGNATURES` (hydrated by app.jsx on bootstrap) instead of a closed-over constant.
+- `ui/main/app.jsx` — bootstrap `Promise.all` extended with `get_signature_db()` and the four `window.*` globals are populated. `ingestSig` rewritten to prefer `pythonMatches[0]` over `lookupSignature`. Match shape unchanged downstream.
+- `ui/main/index.html` — cache busters `v=21` → `v=22`.
+- `version_checker.py` — `5.1.0.dev4` → `5.1.0.dev5`.
+
+**Verified manually:** Tested with sig 11700 (Torite ×3) and sig 7200 (Large Wreck Debris ×3) — both resolve correctly, the overlay popup shows the right tier color and name, the reveal card and telemetry rail update in sync. Three follow-up fixes landed during verification:
+
+1. **Black-screen-on-PING crash** — `RevealCard` was reading `m.sig.toLocaleString()` for the EXPECTED readout. Old data.jsx mock matches had `sig`; new bridge display matches did not. Fixed by adding `sig` (the matched signature) to `_to_display_match`. React's root unmounts on uncaught render errors → entire app went black.
+2. **Defensive globals init** — `data.jsx` now seeds `window.MINERALS/GROUND/SALVAGE/ALL_SIGNATURES` to `[]` synchronously, so any consumer reading them at first render (before bootstrap hydrates) gets an iterable empty array instead of `undefined`. Belt-and-braces against future regressions.
+3. **Display-name format** — ship mineral names changed from `"Torite (Uncommon) ×3"` to `"Torite ×3 (Uncommon)"` so the count sits before the tier qualifier; `nameMain` ("Torite ×3") and `nameSubtitle` ("(Uncommon)") are surfaced separately so the reveal card can render the subtitle at 70% font-size. Salvage debris and ground deposits got the same `Name ×N` treatment (was `Name (N×)`/`Name (Nx)`) for consistency. New CSS class `.reveal-name-sub`.
+
+**Out of scope (deferred):**
+- Surface confidence/count from `rawMatches` in the reveal card UI.
+- Phase 6 — packaging cleanup. Removes `main.py`, `region_selector.py` (after Phase 4's reuse window closes), `theme.py`, `overlay.py` (legacy tk overlay class). Updates `.spec` for PyInstaller.
+
+---
+
+### 2026-04-30 — v5.1.0.dev4: Webview UI migration · Phase 4 (region selector)
+
+Branch `feat/webview-migration`. The OCR scan region picker is now reachable from the React `REGION` panel; the panel itself is enabled in the radial nav. The picker still uses the existing tk-based `RegionSelector` (load screenshot → drag rectangle → save) — this was a deliberate plan-B decision to reuse the tested image+canvas UX rather than reimplement it in JS. Phase 6 will retire `region_selector.py` along with `main.py`.
+
+**Architecture decision — plan B (reuse tk RegionSelector):**
+The two paths considered were (A) port the canvas+clicks fully into React, or (B) keep the tk picker and launch it from a bridge call. Picked B because the tk version already does scaled-image-to-original-coord math, modal lifecycle, and Esc-to-cancel — re-implementing that in React for code that's slated for removal in Phase 6 is throwaway work. The tk modal is created with `parent=None`, so `RegionSelector` builds its own short-lived `tk.Tk()` per invocation — no persistent root needed (the splash root is destroyed in Phase 1). pywebview dispatches JS calls on a worker thread; the bridge call simply calls `selector.open()` which runs `mainloop()` and blocks the worker until the modal closes. Tkinter on a non-main thread is technically unsupported but works on Windows for short modal flows.
+
+**Files modified:**
+- `bridge.py` — new methods exposed to JS: `get_scan_region()` (reads `scan_region.json` via `region_selector.load_region`), `pick_region()` (instantiates `RegionSelector(parent=None, on_save=cb).open()`, blocks until close, returns the new region or `{cancelled: true}`), `clear_scan_region()` (delegates to `region_selector.clear_region`). Module import: `import region_selector`.
+- `ui/main/module-panels.jsx` — `RegionPanel` rewritten as a thin launcher: `[PICK REGION]` (primary, disabled while busy) + `[CLEAR]` buttons + `(x1, y1) / (x2, y2) / size / status` readouts. The fake-HUD-with-drag mock interaction is removed. `useRef` import dropped (no longer needed).
+- `ui/main/app.jsx` — `region` state changed from a hard-coded `{x, y, w, h}` placeholder to `null`, hydrated from `get_scan_region()` on bootstrap; new `regionBusy` flag for the in-flight picker; new `pickRegion` and `clearRegion` callbacks; `MODULES.region.disabled` removed (nav now enabled).
+- `ui/main/index.html` — cache busters `v=20` → `v=21`.
+- `version_checker.py` — `5.1.0.dev3` → `5.1.0.dev4`.
+
+**Files unchanged but worth noting:**
+- `region_selector.py` itself is unchanged. Its `load_region()` / `save_region()` / `clear_region()` / `is_configured()` module helpers + `RegionSelector` class are reused as-is.
+- `scanner.py` already reads `scan_region.json` for OCR — the picker writes through to that file, so the scanner picks up the new region on the next scan with no further plumbing.
+
+**Verified manually:** Pending — UI test next session. Items to verify: REGION nav button enabled and panel renders; PICK REGION opens fullscreen tk picker with file dialog; loading a screenshot, dragging a rectangle, clicking Save returns to React with the new region in the readouts; CLEAR removes the region from `scan_region.json` and resets the readouts; on app relaunch with a saved region, bootstrap re-hydrates it.
+
+**Out of scope (deferred):**
+- Replacing the legacy tk `RegionSelector` with a webview-native picker. Phase 6 will retire it along with `main.py`.
+- Showing the picked region as an annotated overlay on the source screenshot in the React panel. Not required — the readouts are enough for diagnostics.
+
+---
+
+### 2026-04-30 — v5.1.0.dev3: Webview UI migration · Phase 3 (overlay window)
+
+Branch `feat/webview-migration`. The in-game overlay popup is now its own pywebview window — frameless, on-top, transparent — separate from the main console. Detections push to both windows: the main window logs them, the overlay shows the tier-aware match card and auto-hides after `popup_duration` seconds.
+
+**Architecture:**
+The overlay is a second `webview.create_window(...)`, not a `tk.Toplevel`. A single `Bridge` instance is shared by both windows; `_attach_windows(main, overlay)` replaced the old single-window setter. Detection-push split into `_push_to_main` (log) + `_push_to_overlay` (match card). Auto-hide is a `threading.Timer(duration, self._hide_overlay)`, cancelled and rearmed on each new detection so back-to-back hits extend visibility.
+
+**Drag-to-place flow:**
+The PLACE OVERLAY button in Settings calls `enter_overlay_placement_mode()`, which shows the overlay with a sample card and toggles `pywebview-drag-region` on the card body — WebView2 handles the native drag from there. The user drags the card across the screen onto the running game, then clicks SAVE; the bridge reads the window's live `(x, y)`, persists to `config.json`, and pushes the new position back to the main window so the X/Y readouts stay in sync. CANCEL reverts via `overlay.move(*prev_pos)`. No live-drag JS plumbing needed.
+
+**Files added:**
+- `ui/overlay/index.html` — minimal React + Babel page, transparent body, no scrollbars.
+- `ui/overlay/overlay.jsx` — standalone `OverlayCard` (lifted from `module-panels.jsx`) + `PlacementToolbar` rendered only during placement. Receives data via `window.onOverlayDetection(payload)` and `window.onPlacementMode(active)`.
+- `ui/overlay/styles.css` — only the `.ovc*` rules + tier color vars + placement toolbar; zero dependency on `ui/main/styles.css`.
+
+**Files modified:**
+- `bridge.py` — `_attach_window` → `_attach_windows(main, overlay)`. New methods exposed to JS: `test_overlay`, `enter_overlay_placement_mode`, `confirm_overlay_position`, `cancel_overlay_placement`. `_scan_and_push` now also pushes to the overlay when `matches` is non-empty (skipped on errors and NO LOCK). `save_settings` moves the overlay live when X/Y change via numeric inputs (skipped while in placement mode so it doesn't fight the drag). `confirm_overlay_position` pushes `onOverlayPositionSaved` back to the main window.
+- `app_webview.py` — second `webview.create_window(...)` after the main window: `frameless=True, on_top=True, transparent=True, easy_drag=False, hidden=True`, sized 360×240, positioned at saved `popup_position_x/y`. Both windows handed to the bridge via `_attach_windows`.
+- `ui/main/module-panels.jsx` — `SettingsPanel` props extended with `placeOverlay` + `testOverlay`. PLACE OVERLAY button added (primary), TEST OVERLAY enabled (was gated behind a Phase-3 tooltip).
+- `ui/main/app.jsx` — `placeOverlay` and `testOverlay` callbacks added; new `window.onOverlayPositionSaved` listener updates Settings X/Y after a confirmed drag-to-place.
+- `ui/main/styles.css` — added `.settings-hint` class (small steel caption next to PLACE OVERLAY).
+- `ui/main/index.html` — cache busters `v=18` → `v=19`.
+- `version_checker.py` — `5.1.0.dev2` → `5.1.0.dev3`.
+
+**Verified manually:** Pending — UI test next session. Items to verify: PLACE OVERLAY shows the card, drag works, SAVE persists `(x, y)` to config.json and updates Settings readouts; CANCEL reverts; TEST OVERLAY pushes the sample payload and auto-hides after `duration` seconds; real screenshot drop into the watched folder shows the match card on the overlay AND a log entry on the main window; numeric X/Y inputs move the overlay live (when not in placement mode); duration/scale changes apply on next detection.
+
+**Out of scope (deferred):**
+- Click-through overlay — auto-hide is enough for now.
+- Live scale CSS-var push from `save_settings` — overlay uses fixed sizing today; revisit if scale becomes important to verify before relaunch.
+- Fixing the broken HUD preview in `module-panels.jsx::OverlayCard` (uses class names like `.overlay-card`, `.ovc-header`, `.ovc-corners`, `.ovc-rivets`, `.ovc-code` that don't exist in `ui/main/styles.css`). Phase 2 leftover; cosmetic only.
+
+---
+
+### 2026-04-30 — v5.1.0.dev2: Webview UI migration · Phase 2 (Settings panel)
+
+Branch `feat/webview-migration`. The Settings panel is now wired end-to-end through the bridge to the existing `config.json`. The `SETTINGS` radial nav button is enabled.
+
+**Schema translation in the bridge:**
+React UI uses camelCase + integer percent scale; `config.json` uses snake_case + float scale (kept compatible with the running tkinter `main.py`). Mapping applied in both directions in `bridge.py`:
+
+| `config.json` (snake_case) | React state (camelCase) |
+|---|---|
+| `popup_position_x` | `popupX` |
+| `popup_position_y` | `popupY` |
+| `popup_duration` | `duration` |
+| `popup_scale` (float, e.g. `1.3`) | `scale` (int %, e.g. `130`) |
+| `debug_mode` | `debug` |
+| `debug_folder` | `debugFolder` |
+
+**Files modified:**
+- `bridge.py` — added `get_settings`, `save_settings`, `pick_debug_folder`. `save_settings` writes through `Config.save()` and applies `scanner.enable_debug(...)` so the next OCR scan picks up changes immediately.
+- `ui/main/app.jsx` — bootstrap now fetches `get_settings` alongside `get_initial_state`; new `persistSettings` callback updates state immediately and debounces a `save_settings` call by 200 ms; new `browseDebugFolder` callback; `SETTINGS` enabled in `MODULES`.
+- `ui/main/module-panels.jsx` — `SettingsPanel` props extended with `browseDebugFolder` + `bridgeReady`; debug folder is now an editable input with a BROWSE button (mirrors the scanner panel pattern); the unwired `sound` toggle removed; the fake "SCREENSHOTS PROCESSED 142" readout removed; the `TEST OVERLAY` button placeholder added but disabled with a Phase-3 tooltip.
+- `ui/main/index.html` — cache busters bumped on every `script src` and the stylesheet (`v=17` → `v=18`) so WebView2 always picks up new JSX/CSS on relaunch.
+- `version_checker.py` — `5.1.0.dev1` → `5.1.0.dev2`.
+
+**Deferred from Phase 2 (need overlay window or live tk root):**
+- "Test overlay" button — requires an `OverlayPopup` instance, but no `tk.Tk()` root is alive once the splash closes. Wires up in Phase 3.
+- "Pick position" via in-game draggable adjuster — same constraint. The in-UI drag-on-thumbnail still works for entering popup X/Y by hand.
+
+**Verified manually:**
+SETTINGS panel renders with values from existing `config.json`; dragging the screen-thumbnail updates X/Y; sliders update duration/scale; toggling debug flips `debug_mode` in `config.json` and applies live to the scanner; BROWSE picks a debug folder via native dialog; CENTER button resets to 1920/1080; TEST OVERLAY is correctly disabled with a Phase-3 tooltip.
+
+---
+
+### 2026-04-30 — v5.1.0.dev1: Webview UI migration · Phase 1 (scaffold + scanner)
+
+Branch `feat/webview-migration`. Migration from tkinter to a React desktop UI hosted in pywebview, executed in six vertical-slice phases. Phase 1 establishes the scaffold and ports the scanner panel only; tkinter `main.py` remains runnable in parallel.
+
+**Architecture decision — option B2 (full webview):**
+Reviewed three options before starting: (A) restyle tkinter as a design reference only, (B1) hybrid main-window-webview + keep-tkinter-overlay, (B2) full webview for main + overlay + region selector, (C) PyQt rewrite. Selected B2 because it lets Designer's full sci-fi console aesthetic land 1:1 from the JSX prototype. Trade-offs accepted: Microsoft Edge WebView2 becomes a runtime requirement (preinstalled on Win10/11); pywebview adds ~600 KB to the venv; some webview Windows quirks (transparency, click-through) deferred until phases 3–4.
+
+**Bundling — babel-standalone in the browser:**
+No Node toolchain, no build step. Future Designer JSX iterations drop in cleanly. ~1–2 s startup compile cost is masked by the existing tkinter splash. If types/source-maps/npm packages become important later, a Vite migration is mechanical.
+
+**Files added:**
+- `app_webview.py` — frameless 1020×800 entry. Tkinter splash → loads OCR/scanner/monitor → opens pywebview window pointing at `ui/main/index.html`.
+- `bridge.py` — `Bridge` class exposed via pywebview `js_api`. Public surface: `get_initial_state`, `pick_screenshot_folder`, `set_screenshot_folder`, `start_monitoring`, `stop_monitoring`, `test_detection`, `minimize_window`, `maximize_window`, `close_window`. Private setup `_attach_window()`. Detection events pushed to JS via `window.evaluate_js("window.onDetection(...)")`.
+- `ui/main/` — Designer's React 18 + babel-standalone JSX moved out of `Project Rockfinder/`. The latter retains only the design-archive screenshots in `ref/` and `_check/`.
+
+**Files modified:**
+- `requirements.txt` — added `pywebview>=6.2.0`.
+- `version_checker.py` — `CURRENT_VERSION` bumped `5.0.0` → `5.1.0.dev1`.
+- `ui/main/app.jsx` — TWEAK_DEFAULTS / `useTweaks` / `TweaksUI` removed; non-scanner radial nav buttons (`INDEX`, `HUD`, `REGION`, `SETTINGS`) gated with `disabled: true` and a "Coming in a later phase" tooltip; bridge-ready hook + bootstrap state from `get_initial_state`; `window.onDetection` receives Python pushes; folder browse + monitoring + ping all routed through `pywebview.api.*`; `WindowControls` component (—, ×) calling `bridge.minimize_window` / `bridge.close_window`; `pywebview-drag-region` class on `brand-block`.
+- `ui/main/scanner-panel.jsx` — props renamed to `toggleMonitoring`, `browseFolder`, `bridgeReady`; buttons gain `disabled={!bridgeReady}` until JS bridge is up.
+- `ui/main/styles.css` — removed `body::before` vignette overlay (z-index 2 over content was washing the UI to <100% opacity); added `.pywebview-drag-region` (cursor grab/grabbing), `.win-controls`, `.win-btn` / `.win-btn.close`, and `.rn-item.disabled` styling.
+- `ui/main/index.html` — dropped `tweaks-panel.jsx` script tag; cache buster `v=16` → `v=17`.
+
+**Files dropped:** `tweaks-panel.jsx` (Designer-only debug controls).
+
+**Verified manually:**
+Splash → console handoff; brand-area drag works; min/× window controls work; BROWSE opens native folder picker and persists to `config.json`; ENGAGE without folder yields error popup; with valid folder switches to MONITORING; dropping a real Star Citizen screenshot into the watched folder produces a live detection log entry; PING opens file dialog and runs OCR against the chosen screenshot; HALT returns to STANDBY; window resizes cleanly down to the `min_size=(960, 700)` floor.
+
+**Known limitations of phase 1:**
+- Match names/tiers in the React UI come from the JS-side mock `data.jsx`, not the real Python signature DB. Ship-mining minerals match correctly because their signatures align; ground deposits (count × base_signature) and salvage debris show "NO LOCK" in the reveal card even when Python correctly identified them. Phase 5 wires the real DB into JS.
+- `INDEX`, `HUD`, `REGION`, `SETTINGS` panels exist in the JSX but are gated off the radial nav.
+- No live OCR confidence / debug folder display in the React UI yet.
+
+**Remaining migration phases:** 2 — Settings panel · 3 — Overlay window · 4 — Region selector · 5 — Index/codex panel · 6 — Packaging (remove tkinter `main.py`, update `.spec`).
+
+---
+
 ### 2026-04-08 — v5.0.0: Security hardening and quality pass
 
 Full red-team + code review + post-review pipeline. All findings addressed.
