@@ -11,7 +11,7 @@ import json
 from typing import Tuple, Optional
 
 # Current version - update this with each release
-CURRENT_VERSION = "6.0.0.dev1"
+CURRENT_VERSION = "6.0.0"
 
 # GitHub repository info - UPDATE THESE when repo is created
 GITHUB_OWNER = "Diftic"
