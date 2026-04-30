@@ -38,6 +38,10 @@ else:
 datas = [
     # Database file
     (str(PROJECT_ROOT / 'data' / 'combat_analyst_db.json'), 'data'),
+    # React UI — main console + overlay window. Loaded at runtime via
+    # paths.get_base_path() / 'ui' / 'main' (or 'overlay') / 'index.html'.
+    (str(PROJECT_ROOT / 'ui' / 'main'), 'ui/main'),
+    (str(PROJECT_ROOT / 'ui' / 'overlay'), 'ui/overlay'),
 ]
 
 # Add EasyOCR character files if found
@@ -58,9 +62,23 @@ if EASYOCR_PATH:
 
 # Hidden imports that PyInstaller might miss
 hiddenimports = [
-    # Tkinter
+    # Tkinter — still used by splash.py and the legacy region_selector.py
+    # (kept until the picker is rewritten webview-native in a later phase).
     'PIL._tkinter_finder',
-    
+
+    # pywebview — main UI runtime
+    'webview',
+    'webview.platforms.edgechromium',
+
+    # Windows OCR (primary) — Windows.Media.Ocr via the modular winrt-* packages
+    'winrt',
+    'winrt.windows.media.ocr',
+    'winrt.windows.globalization',
+    'winrt.windows.graphics.imaging',
+    'winrt.windows.storage.streams',
+    'winrt.windows.foundation',
+    'winrt.windows.foundation.collections',
+
     # Image processing
     'cv2',
     'numpy',
@@ -105,6 +123,8 @@ hiddenimports += collect_submodules('PIL')
 hiddenimports += collect_submodules('torch')
 hiddenimports += collect_submodules('torchvision')
 hiddenimports += collect_submodules('easyocr')
+hiddenimports += collect_submodules('webview')
+hiddenimports += collect_submodules('winrt')
 
 # Collect torch data files (e.g., CUDA libs if present)
 pil_datas = collect_data_files('PIL')
@@ -115,7 +135,7 @@ datas += torch_datas
 datas += torchvision_datas
 
 a = Analysis(
-    ['main.py'],
+    ['app_webview.py'],
     pathex=[str(PROJECT_ROOT)],
     binaries=[],
     datas=datas,

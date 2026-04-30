@@ -94,7 +94,7 @@ cd SC_Signature_Scanner
 pip install -r requirements.txt
 
 # Run
-python main.py
+python app_webview.py
 ```
 
 > **Note:** First run downloads ~115MB of OCR models to `~/.EasyOCR/model/`

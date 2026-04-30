@@ -61,8 +61,8 @@ def main():
 
     # Ensure we're in the right directory
     project_dir = Path(__file__).parent
-    if not (project_dir / "main.py").exists():
-        print("ERROR: main.py not found. Run this script from the project directory.")
+    if not (project_dir / "app_webview.py").exists():
+        print("ERROR: app_webview.py not found. Run this script from the project directory.")
         sys.exit(1)
 
     os.chdir(project_dir)
@@ -83,18 +83,19 @@ def main():
     print_section("Pre-build Checks")
 
     required_files = [
-        "main.py",
+        "app_webview.py",
+        "bridge.py",
         "scanner.py",
-        "overlay.py",
         "splash.py",
         "monitor.py",
         "config.py",
-        "theme.py",
         "paths.py",
         "version_checker.py",
         "region_selector.py",
         "requirements.txt",
         "SC_Signature_Scanner.spec",
+        "ui/main/index.html",
+        "ui/overlay/index.html",
     ]
 
     missing = [f for f in required_files if not (project_dir / f).exists()]
