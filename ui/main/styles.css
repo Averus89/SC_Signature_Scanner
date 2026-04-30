@@ -616,7 +616,7 @@ html, body { display: flex; align-items: center; justify-content: center; }
 }
 .reveal-name {
   font-family: var(--font-display);
-  font-size: 38px;
+  font-size: 27px;
   letter-spacing: 0.06em;
   color: #fff;
   line-height: 1;
@@ -1834,42 +1834,113 @@ body { background: #0c1218 !important; }
 /* Footnote / collision chip already amber-ish — fine */
 
 
-/* ============ HUD STAGE (preview module) ============ */
-.hud-stage {
-  position: relative;
-  aspect-ratio: 16/9;
-  width: 100%;
-  background: radial-gradient(ellipse at center, #1a2230 0%, #06090d 70%);
-  border: 1px solid rgba(255,157,42,0.18);
-  overflow: hidden;
+/* ============ ABOUT PANEL ============ */
+.about-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  height: 100%;
+}
+.about-header {
+  display: flex; align-items: center; gap: 16px;
+  margin-bottom: 14px;
+}
+.about-mark {
+  font-size: 42px;
+  color: var(--amber);
+  text-shadow: 0 0 14px var(--amber);
+  filter: drop-shadow(0 0 4px var(--amber-deep));
+  line-height: 1;
+}
+.about-titleblock { display: flex; flex-direction: column; gap: 4px; }
+.about-title {
+  font-family: var(--font-display);
+  font-size: 22px; letter-spacing: 0.18em;
+  color: var(--amber-hot);
+  text-shadow: 0 0 8px var(--amber-trans);
+}
+.about-sub {
+  font-family: var(--font-mono);
+  font-size: 10px; letter-spacing: 0.22em;
+  color: var(--steel);
+}
+.about-desc {
+  font-family: var(--font-ui);
+  font-size: 13px; line-height: 1.6;
+  color: #d6dde4;
   margin-bottom: 10px;
 }
-.hud-stage-bg {
-  position: absolute; inset: 0;
-  background-image:
-    radial-gradient(circle at 30% 40%, rgba(70,90,120,0.3) 0%, transparent 50%),
-    radial-gradient(circle at 70% 60%, rgba(120,80,60,0.22) 0%, transparent 50%);
+.about-byline {
+  font-family: var(--font-mono);
+  font-size: 11px; letter-spacing: 0.06em;
+  color: #a4b0bf;
+  margin-bottom: 12px;
 }
-.hud-stage-vignette {
-  position: absolute; inset: 0;
-  background: radial-gradient(ellipse at center, transparent 50%, rgba(0,0,0,0.6) 100%);
-  pointer-events: none;
+.about-byline strong { color: var(--amber-hot); font-weight: 600; }
+.about-memorial {
+  font-family: var(--font-mono);
+  font-size: 10px; letter-spacing: 0.14em;
+  color: var(--amber);
+  padding: 8px 12px;
+  border-left: 2px solid var(--amber);
+  background: rgba(255, 157, 42, 0.06);
+  margin-bottom: 16px;
 }
-.hud-stage-cockpit {
-  position: absolute; inset: 0;
-  background-image: 
-    linear-gradient(0deg, transparent 80%, rgba(0,0,0,0.4) 100%),
-    repeating-linear-gradient(0deg, rgba(255,255,255,0.012) 0 1px, transparent 1px 3px);
-  pointer-events: none;
+.about-cols {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 16px;
+  margin-bottom: 16px;
 }
-.hud-stage-card-wrap {
-  position: absolute;
-  left: 50%; top: 50%;
-  transform-origin: center;
+.about-section-title {
+  font-family: var(--font-display);
+  font-size: 11px; letter-spacing: 0.22em;
+  color: var(--amber-hot);
+  margin-bottom: 8px;
+  padding-bottom: 4px;
+  border-bottom: 1px solid rgba(255, 157, 42, 0.3);
 }
-.hud-stats {
-  display: flex; gap: 14px;
-  padding: 6px 4px 0;
+.about-steps {
+  list-style: none;
+  padding: 0; margin: 0;
+  font-family: var(--font-ui);
+  font-size: 12px;
+  color: #d6dde4;
+  counter-reset: step;
+}
+.about-steps li {
+  position: relative;
+  padding: 4px 0 4px 28px;
+  counter-increment: step;
+  line-height: 1.5;
+}
+.about-steps li::before {
+  content: counter(step, decimal-leading-zero);
+  position: absolute; left: 0; top: 4px;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--amber);
+  letter-spacing: 0.04em;
+}
+.about-steps strong { color: var(--amber-hot); font-weight: 600; }
+.about-thanks {
+  list-style: none;
+  padding: 0; margin: 0;
+  font-family: var(--font-ui);
+  font-size: 12px;
+  color: #d6dde4;
+}
+.about-thanks li {
+  padding: 4px 0;
+  letter-spacing: 0.02em;
+}
+.about-thanks strong { color: var(--amber-hot); font-weight: 600; }
+.about-footer {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+  margin-top: 8px;
+  padding-top: 12px;
+  border-top: 1px solid rgba(255, 255, 255, 0.06);
 }
 
 /* ============ DRAGGABLE GAME-SCREEN HANDLE (Settings) ============ */

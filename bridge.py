@@ -35,10 +35,9 @@ class Bridge:
 
     # Base overlay window size at scale=1.0. The window resizes to
     # base × scale after each show so scaled content fits without clipping.
-    # Sized tightly to the card's natural dimensions (min-width 240 + card
-    # padding 28 + root padding 4 ≈ 272×148) so the dark border around the
-    # tier frame stays thin. Placement mode adds ~50px for the (now
-    # 30%-shrunk) SAVE/CANCEL toolbar.
+    # Sized for a single-mineral name on one line (real detections always
+    # match exactly one mineral per signature). Placement mode adds ~50px
+    # for the (30%-shrunk) SAVE/CANCEL toolbar.
     _OVERLAY_BASE_W = 272
     _OVERLAY_BASE_H = 152
     _OVERLAY_PLACEMENT_BASE_H = 200
@@ -523,7 +522,9 @@ class Bridge:
             "sig": 3585,
             "match": {
                 "tier": "rare",
-                "name": "Gold + Borase + Bexalite",
+                "name": "Gold (Rare)",
+                "nameMain": "Gold",
+                "nameSubtitle": "(Rare)",
                 "cat": "ship",
                 "notes": "Mid-tier · sig 3585",
             },
@@ -695,6 +696,8 @@ class Bridge:
             "match": {
                 "tier": first.get("tier", "unknown"),
                 "name": first.get("name", ""),
+                "nameMain": first.get("nameMain", ""),
+                "nameSubtitle": first.get("nameSubtitle", ""),
                 "cat": first.get("cat", ""),
                 "notes": first.get("notes", ""),
             },

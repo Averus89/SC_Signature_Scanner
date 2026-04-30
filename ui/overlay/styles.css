@@ -24,13 +24,27 @@ html, body {
   -webkit-user-select: none;
 }
 
-/* Card stays content-sized (preserves min-width and tier border).
-   2px padding draws a thin dark border between the tier frame and the
-   window edge; any leftover space sits on the body's #0a0e14 background
-   which matches the card's bottom gradient. */
+/* Detection mode: the card fills the entire window so there's literally
+   no body area visible — eliminates the "backdrop" effect entirely.
+   Placement mode: card content-sized + toolbar below; body color matches
+   card edges so any gap is invisible. */
+html, body, #root {
+  width: 100%;
+  height: 100%;
+}
 #root, .overlay-root {
   display: flex;
   flex-direction: column;
+}
+.overlay-root.detection {
+  height: 100%;
+}
+.overlay-root.detection .ovc {
+  flex: 1 1 auto;
+  width: 100%;
+  min-width: 0;
+}
+.overlay-root.placing {
   align-items: flex-start;
   gap: 6px;
   padding: 2px;
@@ -79,8 +93,15 @@ html, body {
   font-family: var(--font-display);
   font-size: 18px; letter-spacing: 0.12em;
   color: #fff;
-  margin-bottom: 6px;
   text-shadow: 0 0 8px color-mix(in oklab, var(--tier) 40%, transparent);
+}
+.ovc-name-sub {
+  font-family: var(--font-display);
+  font-size: 9px;
+  letter-spacing: 0.18em;
+  color: rgba(255, 255, 255, 0.55);
+  margin-top: 2px;
+  margin-bottom: 6px;
 }
 
 .ovc-sig-readout {

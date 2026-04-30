@@ -20,11 +20,8 @@ function OverlayCard({ payload, draggable, durationSec }) {
   const m = payload.match || {};
   const t = TIERS[m.tier] || TIERS.unknown;
   const cls = "ovc" + (draggable ? " pywebview-drag-region" : "");
-  // The progress bar's CSS animation is set inline so it matches the
-  // configured popup_duration. The OverlayCard is keyed by an external
-  // counter so React remounts it on every new payload — that restarts the
-  // CSS animation reliably (otherwise React reuses the DOM node and the
-  // animation only plays the first time).
+  const mineralName = m.nameMain || m.name || "NO LOCK";
+  const tierSub = m.nameSubtitle || "";
   return (
     <div className={cls} style={{ "--tier": t.color }}>
       <span className="ovc-corner tl" />
@@ -35,7 +32,8 @@ function OverlayCard({ payload, draggable, durationSec }) {
         <span>SIG-{payload.sig != null ? payload.sig : "----"}</span>
         <span className="ovc-tier">{t.label}</span>
       </div>
-      <div className="ovc-name">{m.name || "NO LOCK"}</div>
+      <div className="ovc-name">{mineralName}</div>
+      {tierSub && <div className="ovc-name-sub">{tierSub}</div>}
       <div className="ovc-sig-readout">
         <span className="ovc-sig-label">CROSS-SECTION</span>
         <span className="ovc-sig-val">
@@ -73,7 +71,9 @@ const SAMPLE_PAYLOAD = {
   sig: 3585,
   match: {
     tier: "rare",
-    name: "Gold + Borase + Bexalite",
+    name: "Gold (Rare)",
+    nameMain: "Gold",
+    nameSubtitle: "(Rare)",
     cat: "ship",
     notes: "Mid-tier · sig 3585",
   },
@@ -143,9 +143,13 @@ function OverlayApp() {
   // — and is honored by Chromium-based engines (WebView2). Combined with
   // the bridge resizing the window to base × scale, the card visually
   // grows/shrinks together with its window.
+  // Detection mode: card fills the whole window (no body visible).
+  // Placement mode: card content-sized + toolbar below (body color shows
+  // in any gap, but matches card edges so it stays invisible).
   const scale = (payload && payload.scale) || 1;
+  const rootCls = "overlay-root " + (placing ? "placing" : "detection");
   return (
-    <div className="overlay-root" style={{ zoom: scale }}>
+    <div className={rootCls} style={{ zoom: scale }}>
       <OverlayCard
         key={instance}
         payload={payload}

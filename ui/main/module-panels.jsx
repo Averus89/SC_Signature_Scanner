@@ -131,59 +131,6 @@ function CodexPanel({ filter, setFilter }) {
   );
 }
 
-// ============ OVERLAY PREVIEW (HUD module) ============
-function OverlayPreview({ latest, settings }) {
-  const sample = latest || { sig: 3584, match: { tier: 'rare', name: 'Borase + Bexalite', cat: 'ship', notes: 'Mid-tier · 12.5K cluster' }, time: '00:00:00' };
-  return (
-    <Panel title="IN-GAME OVERLAY PREVIEW" code="HUD-10" accent="var(--amber)"
-           status={<span className="log-count">CONFIGURE IN SETTINGS</span>}>
-      <div className="hud-stage">
-        <div className="hud-stage-bg" />
-        <div className="hud-stage-vignette" />
-        <div className="hud-stage-cockpit" />
-        <div className="hud-stage-card-wrap" style={{ transform: `translate(-50%,-50%) scale(${settings.scale / 100})` }}>
-          <OverlayCard latest={sample} />
-        </div>
-      </div>
-      <div className="hud-stats">
-        <Readout label="POSITION" value={`${settings.popupX},${settings.popupY}`} />
-        <Readout label="DURATION" value={`${settings.duration}s`} />
-        <Readout label="SCALE" value={`${settings.scale}%`} />
-      </div>
-    </Panel>
-  );
-}
-
-function OverlayCard({ latest }) {
-  if (!latest) return <div className="overlay-card empty"><Stencil>AWAITING SIGNAL</Stencil></div>;
-  const m = latest.match;
-  const t = window.TIERS[m?.tier] || window.TIERS.unknown;
-  return (
-    <div className="overlay-card" style={{ '--tier': t.color }}>
-      <div className="ovc-corners">
-        <span className="ovc-corner tl" /><span className="ovc-corner tr" />
-        <span className="ovc-corner bl" /><span className="ovc-corner br" />
-      </div>
-      <div className="ovc-rivets" />
-      <div className="ovc-header">
-        <span className="ovc-code">SIG-{latest.sig}</span>
-        <span className="ovc-tier" style={{ color: t.color }}>{t.label}</span>
-      </div>
-      <div className="ovc-name">{m?.name || 'NO LOCK'}</div>
-      <div className="ovc-sig-readout">
-        <span className="ovc-sig-label">CROSS-SECTION</span>
-        <span className="ovc-sig-val">{latest.sig.toLocaleString()}</span>
-      </div>
-      <div className="ovc-meta">
-        <span>{m?.cat?.toUpperCase() || '—'}</span>
-        <span className="ovc-dot" />
-        <span>{m?.notes?.split('—')[0] || ''}</span>
-      </div>
-      <div className="ovc-progress"><div className="ovc-progress-fill" /></div>
-    </div>
-  );
-}
-
 // ============ INDEX PANEL ============
 // Top-level signatures module — class -> tier -> entries
 function IndexPanel({ activeSig }) {
@@ -313,4 +260,72 @@ function GroundCallout() {
   );
 }
 
-Object.assign(window, { RegionPanel, SettingsPanel, CodexPanel, OverlayPreview, OverlayCard, IndexPanel });
+// ============ ABOUT PANEL ============
+function AboutPanel({ version, ocrEngine }) {
+  return (
+    <div className="about-grid">
+      <Panel
+        title="ABOUT"
+        code="ABT-05"
+        accent="var(--amber)"
+        status={<span className="log-count">v{version || '—'}</span>}
+      >
+        <div className="about-header">
+          <span className="about-mark">⛏</span>
+          <div className="about-titleblock">
+            <div className="about-title">SC SIGNATURE SCANNER</div>
+            <div className="about-sub">STAR CITIZEN · TARGET IDENTIFICATION</div>
+          </div>
+        </div>
+
+        <div className="about-desc">
+          Monitors Star Citizen screenshots for signature values and identifies
+          potential targets in real-time.
+        </div>
+
+        <div className="about-byline">
+          Made in 2026 by <strong>Mallachi</strong>, ..All solutions start with a problem worth solving..
+        </div>
+
+        <div className="about-memorial">
+          ✦ In memory of Regolith.Rocks — The Industrial Community
+        </div>
+
+        <div className="about-cols">
+          <section className="about-section">
+            <div className="about-section-title">HOW TO USE</div>
+            <ol className="about-steps">
+              <li>Set Star Citizen to Windowed or Borderless</li>
+              <li>Define the scan region in <strong>REGION</strong></li>
+              <li>Set your screenshot folder in <strong>SCANNER</strong></li>
+              <li>Click <strong>ENGAGE</strong> to start monitoring</li>
+              <li>In-game: PrintScreen on a signature</li>
+              <li>Overlay shows the identification</li>
+            </ol>
+          </section>
+
+          <section className="about-section">
+            <div className="about-section-title">THANKS TO</div>
+            <ul className="about-thanks">
+              <li><strong>Raychaser</strong> · Regolith.Rocks · The original inspiration </li>
+              <li><strong>Your name here?</strong> · Test crew</li>
+              <li><strong>Your name here?</strong> · Test crew</li>
+              <li>__________________________________________________________</li>
+              <li><strong>ToDo in future version</strong></li>
+              <li>Ability to decode ship signature values. All ships have unique minimum signature from 3 set angles. This currently creates too many overlapping results between ships when calculating sub-optimal angle of approach. Need better calculation methods.</li>
+              <li>Work is in progress to solve this challenge</li>
+            </ul>
+          </section>
+        </div>
+
+        <div className="about-footer">
+          <Readout label="OCR ENGINE" value={ocrEngine || '—'} accent="var(--green)" />
+          <Readout label="UI" value="React + pywebview" />
+          <Readout label="LICENSE" value="MIT" />
+        </div>
+      </Panel>
+    </div>
+  );
+}
+
+Object.assign(window, { RegionPanel, SettingsPanel, CodexPanel, IndexPanel, AboutPanel });

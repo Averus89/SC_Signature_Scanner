@@ -3,10 +3,10 @@ const { useState, useEffect, useRef, useCallback } = React;
 
 const MODULES = [
   { id: 'scanner',  label: 'SCANNER',  code: '01', glyph: '◉' },
-  { id: 'index',    label: 'INDEX',    code: '02', glyph: '≡', disabled: true },
-  { id: 'overlay',  label: 'HUD',      code: '03', glyph: '◇', disabled: true },
-  { id: 'region',   label: 'REGION',   code: '04', glyph: '⊞' },
-  { id: 'settings', label: 'SETTINGS', code: '05', glyph: '⚙' },
+  { id: 'index',    label: 'INDEX',    code: '02', glyph: '≡' },
+  { id: 'region',   label: 'REGION',   code: '03', glyph: '⊞' },
+  { id: 'settings', label: 'SETTINGS', code: '04', glyph: '⚙' },
+  { id: 'about',    label: 'ABOUT',    code: '05', glyph: 'ⓘ' },
 ];
 
 function useTime() {
@@ -26,6 +26,7 @@ function App() {
   const [region, setRegion] = useState(null);
   const [regionBusy, setRegionBusy] = useState(false);
   const [ocrEngine, setOcrEngine] = useState('—');
+  const [version, setVersion] = useState('');
   const [screenshotFolder, setScreenshotFolder] = useState('');
   const [codexFilter, setCodexFilter] = useState('all');
   const [settings, setSettings] = useState({
@@ -60,6 +61,7 @@ function App() {
         setScreenshotFolder(state.screenshotFolder);
       }
       if (state && state.ocrEngine) setOcrEngine(state.ocrEngine);
+      if (state && state.version) setVersion(state.version);
       if (sets) setSettings(sets);
       if (reg) setRegion(reg);
       if (db) {
@@ -255,7 +257,7 @@ function App() {
       </RivetBar>
 
       <div className="console-body">
-        <RadialNav mod={mod} setMod={setMod} />
+        <RadialNav mod={mod} setMod={setMod} version={version} />
         <main className="module-stage">
           {mod === 'scanner' && (
             <ScannerPanel
@@ -292,7 +294,7 @@ function App() {
           )}
           {mod === 'codex' && <CodexPanel filter={codexFilter} setFilter={setCodexFilter} />}
           {mod === 'index' && <IndexPanel activeSig={latest?.sig} />}
-          {mod === 'overlay' && <OverlayPreview latest={latest} settings={settings} />}
+          {mod === 'about' && <AboutPanel version={version} ocrEngine={ocrEngine} />}
         </main>
         <TelemetryRail latest={latest} monitoring={monitoring} detections={detections} />
       </div>
@@ -313,7 +315,7 @@ function App() {
   );
 }
 
-function RadialNav({ mod, setMod }) {
+function RadialNav({ mod, setMod, version }) {
   return (
     <nav className="radial-nav">
       <div className="rn-frame">
@@ -340,7 +342,7 @@ function RadialNav({ mod, setMod }) {
         </div>
         <div className="rn-footer">
           <div className="rn-rivets"><span /><span /><span /><span /></div>
-          <Stencil size="sm">v6.0.0</Stencil>
+          <Stencil size="sm">{version ? `v${version}` : '—'}</Stencil>
         </div>
       </div>
     </nav>
