@@ -70,15 +70,6 @@ hiddenimports = [
     'webview',
     'webview.platforms.edgechromium',
 
-    # Windows OCR (primary) — Windows.Media.Ocr via the modular winrt-* packages
-    'winrt',
-    'winrt.windows.media.ocr',
-    'winrt.windows.globalization',
-    'winrt.windows.graphics.imaging',
-    'winrt.windows.storage.streams',
-    'winrt.windows.foundation',
-    'winrt.windows.foundation.collections',
-
     # Image processing
     'cv2',
     'numpy',
@@ -124,7 +115,6 @@ hiddenimports += collect_submodules('torch')
 hiddenimports += collect_submodules('torchvision')
 hiddenimports += collect_submodules('easyocr')
 hiddenimports += collect_submodules('webview')
-hiddenimports += collect_submodules('winrt')
 
 # Collect torch data files (e.g., CUDA libs if present)
 pil_datas = collect_data_files('PIL')

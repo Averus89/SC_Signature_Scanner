@@ -3,20 +3,8 @@
 # Author: Mallachi
 
 # ===== OCR Engine =====
-# Primary: Windows OCR (Windows.Media.Ocr) — built into Windows 10/11.
-# Faster, no model download, better accuracy on clean UI text. Reached
-# from Python via the modular winrt-* prebuilt-wheel packages.
-winrt-runtime>=3.0.0
-winrt-Windows.Media.Ocr>=3.0.0
-winrt-Windows.Globalization>=3.0.0
-winrt-Windows.Graphics.Imaging>=3.0.0
-winrt-Windows.Storage.Streams>=3.0.0
-winrt-Windows.Foundation>=3.0.0
-winrt-Windows.Foundation.Collections>=3.0.0
-
-# Fallback: EasyOCR (deep learning OCR). Used only when Windows OCR is
-# unavailable (English language profile not installed, etc.). First run
-# downloads ~115MB of model files to ~/.EasyOCR/model/.
+# EasyOCR — deep learning based OCR.
+# First run downloads ~115 MB of model files to ~/.EasyOCR/model/.
 easyocr>=1.7.0
 
 # PyTorch - Required by EasyOCR (CPU version)

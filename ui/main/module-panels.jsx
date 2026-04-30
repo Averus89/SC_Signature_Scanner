@@ -36,7 +36,7 @@ function RegionPanel({ region, pickRegion, clearRegion, bridgeReady, busy }) {
 // ============ SETTINGS PANEL ============
 function SettingsPanel({
   settings, setSettings, browseDebugFolder, bridgeReady,
-  placeOverlay, testOverlay, ocrEngine,
+  placeOverlay, testOverlay,
 }) {
   const upd = (k, v) => setSettings(s => ({ ...s, [k]: v }));
 
@@ -67,32 +67,34 @@ function SettingsPanel({
             <input type="range" min="50" max="200" value={settings.scale} onChange={e => upd('scale', +e.target.value)} />
             <span className="val">{settings.scale}%</span>
           </label>
-          <label className="lbl row">
-            <input type="checkbox" checked={settings.debug} onChange={e => upd('debug', e.target.checked)} />
-            <span>ENABLE DEBUG OUTPUT</span>
-          </label>
         </div>
         <div style={{ marginTop: 12 }}>
           <MrButton small onClick={testOverlay} disabled={!bridgeReady}>TEST OVERLAY</MrButton>
         </div>
       </Panel>
 
-      <Panel title="STORAGE" code="STO-08">
+      <Panel title="DEBUG OUTPUT" code="DBG-08">
         <div className="settings-stack">
+          <label className="lbl row">
+            <input
+              type="checkbox"
+              checked={settings.debug}
+              onChange={e => upd('debug', e.target.checked)}
+            />
+            <span>ENABLE DEBUG OUTPUT</span>
+          </label>
           <div className="mon-folder">
-            <div className="mon-label">DEBUG OUTPUT FOLDER</div>
+            <div className="mon-label">OUTPUT FOLDER</div>
             <div className="mon-folder-row">
               <input
                 className="mr-input"
                 value={settings.debugFolder || ''}
                 onChange={e => upd('debugFolder', e.target.value)}
-                placeholder="(unset — debug output disabled)"
+                placeholder="(unset — uses default location next to exe)"
               />
               <MrButton small icon="▸" onClick={browseDebugFolder} disabled={!bridgeReady}>BROWSE</MrButton>
             </div>
           </div>
-          <Readout label="OCR ENGINE" value={ocrEngine || '—'} accent="var(--green)" />
-          <Readout label="SC PATCH" value="4.7+" />
         </div>
       </Panel>
     </div>
@@ -261,14 +263,38 @@ function GroundCallout() {
 }
 
 // ============ ABOUT PANEL ============
-function AboutPanel({ version, ocrEngine }) {
+function AboutPanel({ version, versionDev, ocrEngine, bridgeReady }) {
+  // Status pill shows the full dev string (e.g. "6.0.0.dev1"); the radial
+  // nav footer + page title use the clean public version.
+  const statusVersion = versionDev || version || '—';
+  const [updateState, setUpdateState] = React.useState({ phase: 'idle' });
+
+  const checkUpdates = async () => {
+    if (!bridgeReady) return;
+    setUpdateState({ phase: 'checking' });
+    try {
+      const r = await window.pywebview.api.check_for_updates();
+      if (!r || !r.ok) {
+        setUpdateState({ phase: 'error', message: r?.error || 'Update check failed.' });
+        return;
+      }
+      setUpdateState({
+        phase: r.isNewer ? 'newer' : 'current',
+        latest: r.latestVersion,
+        url: r.downloadUrl,
+      });
+    } catch (err) {
+      setUpdateState({ phase: 'error', message: String(err) });
+    }
+  };
+
   return (
     <div className="about-grid">
       <Panel
         title="ABOUT"
         code="ABT-05"
         accent="var(--amber)"
-        status={<span className="log-count">v{version || '—'}</span>}
+        status={<span className="log-count">v{statusVersion}</span>}
       >
         <div className="about-header">
           <span className="about-mark">⛏</span>
@@ -322,6 +348,33 @@ function AboutPanel({ version, ocrEngine }) {
           <Readout label="OCR ENGINE" value={ocrEngine || '—'} accent="var(--green)" />
           <Readout label="UI" value="React + pywebview" />
           <Readout label="LICENSE" value="MIT" />
+        </div>
+
+        <div className="about-update">
+          <MrButton
+            small
+            primary
+            onClick={checkUpdates}
+            disabled={!bridgeReady || updateState.phase === 'checking'}
+          >
+            {updateState.phase === 'checking' ? 'CHECKING…' : 'CHECK FOR UPDATES'}
+          </MrButton>
+          {updateState.phase === 'current' && (
+            <span className="about-update-msg ok">
+              ✓ Up to date · latest is v{updateState.latest}
+            </span>
+          )}
+          {updateState.phase === 'newer' && (
+            <span className="about-update-msg new">
+              ◆ New version v{updateState.latest} available
+              {updateState.url && (
+                <> — <a href={updateState.url} target="_blank" rel="noopener noreferrer">download</a></>
+              )}
+            </span>
+          )}
+          {updateState.phase === 'error' && (
+            <span className="about-update-msg err">⚠ {updateState.message}</span>
+          )}
         </div>
       </Panel>
     </div>

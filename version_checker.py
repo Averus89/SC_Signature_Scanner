@@ -11,7 +11,7 @@ import json
 from typing import Tuple, Optional
 
 # Current version - update this with each release
-CURRENT_VERSION = "5.1.0.dev7"
+CURRENT_VERSION = "6.0.0.dev1"
 
 # GitHub repository info - UPDATE THESE when repo is created
 GITHUB_OWNER = "Diftic"
@@ -34,12 +34,21 @@ def _validate_release_url(url: str) -> bool:
 
 
 def _parse_version_tuple(version_str: str) -> Tuple[int, ...]:
-    """Parse a version string like '1.2.3' into a tuple (1, 2, 3)."""
-    try:
-        parts = version_str.split('.')
-        return tuple(int(p) for p in parts)
-    except (ValueError, AttributeError):
+    """Parse '1.2.3' or '1.2.3.dev1' into (1, 2, 3).
+
+    Stops at the first non-numeric segment so PEP 440 pre-release suffixes
+    (.devN, .rcN, etc.) don't collapse the whole tuple to (0, 0, 0) and
+    poison the > comparison.
+    """
+    if not isinstance(version_str, str) or not version_str:
         return (0, 0, 0)
+    parts: list[int] = []
+    for p in version_str.split('.'):
+        try:
+            parts.append(int(p))
+        except ValueError:
+            break
+    return tuple(parts) if parts else (0, 0, 0)
 
 
 def get_current_version() -> str:

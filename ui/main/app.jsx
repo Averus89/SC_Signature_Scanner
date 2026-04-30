@@ -27,6 +27,7 @@ function App() {
   const [regionBusy, setRegionBusy] = useState(false);
   const [ocrEngine, setOcrEngine] = useState('—');
   const [version, setVersion] = useState('');
+  const [versionDev, setVersionDev] = useState('');
   const [screenshotFolder, setScreenshotFolder] = useState('');
   const [codexFilter, setCodexFilter] = useState('all');
   const [settings, setSettings] = useState({
@@ -62,6 +63,7 @@ function App() {
       }
       if (state && state.ocrEngine) setOcrEngine(state.ocrEngine);
       if (state && state.version) setVersion(state.version);
+      if (state && state.versionDev) setVersionDev(state.versionDev);
       if (sets) setSettings(sets);
       if (reg) setRegion(reg);
       if (db) {
@@ -289,24 +291,22 @@ function App() {
               bridgeReady={bridgeReady}
               placeOverlay={placeOverlay}
               testOverlay={testOverlay}
-              ocrEngine={ocrEngine}
             />
           )}
           {mod === 'codex' && <CodexPanel filter={codexFilter} setFilter={setCodexFilter} />}
           {mod === 'index' && <IndexPanel activeSig={latest?.sig} />}
-          {mod === 'about' && <AboutPanel version={version} ocrEngine={ocrEngine} />}
+          {mod === 'about' && <AboutPanel version={version} versionDev={versionDev} ocrEngine={ocrEngine} bridgeReady={bridgeReady} />}
         </main>
         <TelemetryRail latest={latest} monitoring={monitoring} detections={detections} />
       </div>
 
       <RivetBar className="bottom-bar">
         <div className="ticker">
-          <span className="ticker-label">TICKER</span>
           <div className="ticker-content">
             <span>◆ Windowed/Borderless required for in-game overlay</span>
             <span>◆ {detections.length} signatures processed this session</span>
             <span>◆ Region {region ? 'LOCKED' : 'UNSET'}</span>
-            <span>◆ EasyOCR engine warm</span>
+            <span>◆ {ocrEngine} engine warm</span>
             <span>◆ In memory of Regolith.Rocks — The Industrial Community</span>
           </div>
         </div>
@@ -341,8 +341,7 @@ function RadialNav({ mod, setMod, version }) {
           ))}
         </div>
         <div className="rn-footer">
-          <div className="rn-rivets"><span /><span /><span /><span /></div>
-          <Stencil size="sm">{version ? `v${version}` : '—'}</Stencil>
+          <span className="rn-version">{version ? `Version ${version}` : '—'}</span>
         </div>
       </div>
     </nav>
@@ -351,7 +350,7 @@ function RadialNav({ mod, setMod, version }) {
 
 function TelemetryRail({ latest, monitoring, detections }) {
   // recent tier histogram
-  const counts = { legendary: 0, epic: 0, rare: 0, uncommon: 0, common: 0 };
+  const counts = { legendary: 0, epic: 0, rare: 0, uncommon: 0, common: 0, salvage: 0 };
   detections.slice(-30).forEach(d => { if (d.match && counts[d.match.tier] != null) counts[d.match.tier]++; });
   const max = Math.max(1, ...Object.values(counts));
   return (

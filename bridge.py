@@ -56,6 +56,17 @@ class Bridge:
         # the rendered card picks up the new zoom factor without a relaunch.
         self._overlay_last_payload: Optional[dict[str, Any]] = None
 
+        # Apply persisted debug settings to the scanner now so saved state
+        # takes effect immediately on next scan — without the user having
+        # to re-touch Settings after every relaunch.
+        if self.scanner is not None:
+            cfg = self.config.load() or {}
+            debug_dir = Path(cfg["debug_folder"]) if cfg.get("debug_folder") else None
+            self.scanner.enable_debug(
+                bool(cfg.get("debug_mode", False)),
+                debug_dir,
+            )
+
     # ---- Private setup (not exposed to JS) ---------------------------------
 
     def _attach_windows(
@@ -69,23 +80,52 @@ class Bridge:
 
     # ---- Initial state ------------------------------------------------------
 
+    @staticmethod
+    def _short_version(full: str) -> str:
+        """Trim to major.minor for the public display:
+        '6.0.0' -> '6.0', '6.1.2' -> '6.1', '7.0' -> '7.0'."""
+        parts = full.split(".")
+        return ".".join(parts[:2]) if len(parts) >= 2 else full
+
     def get_initial_state(self) -> dict[str, Any]:
         """Return state for the React app to bootstrap with."""
         cfg = self.config.load() or {}
+        # Public version drops the .devN suffix and any trailing .0 patch;
+        # the full string stays for the About panel's top-right status pill.
+        from version_checker import CURRENT_VERSION
+        public_version = self._short_version(CURRENT_VERSION.split(".dev")[0])
         return {
             "screenshotFolder": cfg.get("screenshot_folder", ""),
             "monitoring": False,
-            "version": "5.1.0.dev7",
+            "version": public_version,
+            "versionDev": CURRENT_VERSION,
             "ocrEngine": getattr(self.scanner, "engine_name", "—") if self.scanner else "—",
         }
 
     # ---- Folder picker ------------------------------------------------------
 
+    def _start_dir(self, prefer: str) -> Optional[str]:
+        """Return a sensible starting directory for a file dialog so the
+        OS doesn't reuse the last-used folder across unrelated pickers
+        (e.g. opening the screenshot picker from the debug-folder location).
+
+        prefer: 'screenshot' or 'debug'.
+        """
+        cfg = self.config.load() or {}
+        key = "screenshot_folder" if prefer == "screenshot" else "debug_folder"
+        candidate = cfg.get(key) or ""
+        if candidate and Path(candidate).is_dir():
+            return str(candidate)
+        return None
+
     def pick_screenshot_folder(self) -> Optional[str]:
         """Open the native folder dialog. Returns the selected path or None."""
         if not self._main_window:
             return None
-        result = self._main_window.create_file_dialog(webview.FileDialog.FOLDER)
+        result = self._main_window.create_file_dialog(
+            webview.FileDialog.FOLDER,
+            directory=self._start_dir("screenshot") or "",
+        )
         if not result:
             return None
         path = result[0] if isinstance(result, (list, tuple)) else result
@@ -212,7 +252,10 @@ class Bridge:
         """Open the native folder dialog for the debug output folder."""
         if not self._main_window:
             return None
-        result = self._main_window.create_file_dialog(webview.FileDialog.FOLDER)
+        result = self._main_window.create_file_dialog(
+            webview.FileDialog.FOLDER,
+            directory=self._start_dir("debug") or "",
+        )
         if not result:
             return None
         path = result[0] if isinstance(result, (list, tuple)) else result
@@ -273,6 +316,7 @@ class Bridge:
         files = self._main_window.create_file_dialog(
             webview.FileDialog.OPEN,
             allow_multiple=False,
+            directory=self._start_dir("screenshot") or "",
             file_types=(
                 "Image files (*.png;*.jpg;*.jpeg;*.webp;*.bmp)",
                 "All files (*.*)",
@@ -287,6 +331,33 @@ class Bridge:
             daemon=True,
         ).start()
         return {"ok": True}
+
+    # ---- Updates ------------------------------------------------------------
+
+    def check_for_updates(self) -> dict[str, Any]:
+        """Hit GitHub's releases API to see if a newer version is published.
+
+        Returns a JSON-friendly dict the About panel can render directly.
+        """
+        try:
+            import version_checker
+            result = version_checker.check_for_updates()
+        except Exception as e:  # noqa: BLE001 — surfaced to UI as error string
+            return {"ok": False, "error": f"Update check failed: {e}"}
+
+        if not result:
+            return {"ok": False, "error": "Update check returned no result."}
+
+        is_newer, latest, html_url = result
+        if latest is None:
+            return {"ok": False, "error": "Could not reach the update endpoint."}
+
+        return {
+            "ok": True,
+            "isNewer": bool(is_newer),
+            "latestVersion": latest,
+            "downloadUrl": html_url or "",
+        }
 
     # ---- Signature database -------------------------------------------------
 
@@ -460,6 +531,7 @@ class Bridge:
         files = self._main_window.create_file_dialog(
             webview.FileDialog.OPEN,
             allow_multiple=False,
+            directory=self._start_dir("screenshot") or "",
             file_types=(
                 "Image files (*.png;*.jpg;*.jpeg)",
                 "All files (*.*)",

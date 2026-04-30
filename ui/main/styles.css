@@ -520,13 +520,17 @@ html, body { display: flex; align-items: center; justify-content: center; }
 .rn-footer {
   padding: 10px 14px;
   border-top: 1px solid rgba(255,157,42,0.18);
-  display: flex; justify-content: space-between; align-items: center;
+  display: flex; justify-content: center; align-items: center;
 }
-.rn-rivets { display: flex; gap: 6px; }
-.rn-rivets span {
-  width: 6px; height: 6px; border-radius: 50%;
-  background: radial-gradient(circle at 30% 30%, #5b6675 0%, #1a2128 70%);
+.rn-version {
+  font-family: var(--font-display);
+  font-size: 10px;
+  letter-spacing: 0.12em;
+  color: var(--steel);
 }
+/* Hide the bottom-bar's left rivets — used to flank the TICKER label
+   which has been removed; the marquee just runs full-width now. */
+.bottom-bar .mr-rivets-left { display: none; }
 
 /* ================================================================
    SCANNER GRID
@@ -1603,6 +1607,7 @@ html, body { display: flex; align-items: center; justify-content: center; }
   background: rgba(255,255,255,0.06);
   display: block;
   position: relative;
+  margin-left: 16px;
 }
 .tlm-bar-fill {
   display: block;
@@ -1941,6 +1946,25 @@ body { background: #0c1218 !important; }
   margin-top: 8px;
   padding-top: 12px;
   border-top: 1px solid rgba(255, 255, 255, 0.06);
+}
+.about-update {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  margin-top: 16px;
+}
+.about-update-msg {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: 0.06em;
+}
+.about-update-msg.ok  { color: var(--green); }
+.about-update-msg.new { color: var(--amber-hot); }
+.about-update-msg.err { color: var(--red); }
+.about-update-msg a {
+  color: var(--amber-hot);
+  text-decoration: underline;
 }
 
 /* ============ DRAGGABLE GAME-SCREEN HANDLE (Settings) ============ */
