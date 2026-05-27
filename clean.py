@@ -16,10 +16,85 @@ sys.path.insert(0, str(Path(__file__).parent))
 import paths
 
 
+def _kill_running_processes(root: Path) -> int:
+    """Terminate any process whose executable lives under `root`.
+
+    Returns the count of processes killed. Prints per-process status.
+
+    Cross-platform via psutil. Used so subsequent rmtree calls don't fail with
+    PermissionError on locked .pyd / .exe files that a running bundle has
+    mmap'd (e.g. a stale dist/SC_Signature_Scanner.exe left over from manual
+    testing). Skips the running Python interpreter itself.
+    """
+    try:
+        import psutil  # type: ignore[import-not-found]
+    except ImportError:
+        print("  (psutil not installed; skipping process cleanup. "
+              "Run 'pip install psutil' if cleanup fails on locked files.)")
+        return 0
+
+    root_resolved = root.resolve()
+    me_pid = psutil.Process().pid
+    killed = 0
+
+    for proc in psutil.process_iter(["pid", "name"]):
+        if proc.pid == me_pid:
+            continue
+        # exe() raises on processes we can't read — system processes, processes
+        # owned by other users on Linux, etc. Skip them; if they're not ours we
+        # don't care, and if they were we wouldn't have permission to kill them
+        # anyway.
+        try:
+            exe = proc.exe()
+        except (psutil.AccessDenied, psutil.NoSuchProcess, OSError):
+            continue
+        if not exe:
+            continue
+        # Windows kernel pseudo-processes (Registry, MemCompression, System,
+        # ...) report bare names from exe() rather than real paths. Skip them
+        # — otherwise Path("Registry").resolve() becomes <cwd>/Registry and
+        # falsely passes the is_relative_to check below.
+        exe_raw = Path(exe)
+        if not exe_raw.is_absolute():
+            continue
+        try:
+            exe_path = exe_raw.resolve()
+        except (OSError, ValueError):
+            continue
+        try:
+            under_root = exe_path.is_relative_to(root_resolved)
+        except ValueError:
+            continue
+        if not under_root:
+            continue
+
+        rel = exe_path.relative_to(root_resolved)
+        name = proc.info.get("name") or "<unknown>"
+        try:
+            print(f"  Terminating: {name} (PID {proc.pid}) - {rel}")
+            proc.terminate()
+            try:
+                proc.wait(timeout=3)
+            except psutil.TimeoutExpired:
+                print(f"    Graceful terminate timed out; force-killing.")
+                proc.kill()
+                proc.wait(timeout=2)
+            killed += 1
+        except psutil.NoSuchProcess:
+            # Process exited between detection and terminate(); treat as killed.
+            killed += 1
+        except psutil.AccessDenied as e:
+            print(f"    Access denied: {e}")
+
+    return killed
+
+
 def clean(include_ocr_models: bool = False):
     """Remove cache files, debug output, user config, API credentials, and deprecated files.
 
-    Cleans:
+    Cleans (in order):
+    - Running processes whose executable lives under the project root
+      (prevents rmtree() from failing on mmap'd .pyd / .exe files)
     - __pycache__ directories and .pyc/.pyo files
     - Tool caches (.pytest_cache, .mypy_cache, .ruff_cache)
     - Debug output folders (SignatureScannerBugreport, debug_output)
@@ -41,6 +116,16 @@ def clean(include_ocr_models: bool = False):
     print("SC Signature Scanner - Cleanup Utility")
     print("=" * 50)
     print(f"Python: {sys.version.split()[0]}")
+    print()
+
+    # ===== Running Processes =====
+    # Must happen BEFORE rmtree on build/dist/dist_debug — Windows refuses to
+    # delete a .pyd while any process has it mmap'd. psutil-based so the same
+    # logic works on Linux/macOS.
+    print("[Running Processes]")
+    killed = _kill_running_processes(root)
+    if killed == 0:
+        print("  (none under project root)")
     print()
 
     # ===== Python Cache =====
@@ -262,6 +347,8 @@ def main():
         print("  --help, -h   Show this help message")
         print()
         print("Removes:")
+        print("  - Processes running from under the project root (e.g. a stale")
+        print("    dist/SC_Signature_Scanner.exe holding files mmap'd)")
         print("  - __pycache__ directories and .pyc/.pyo files")
         print("  - Tool caches (.pytest_cache, .mypy_cache, .ruff_cache)")
         print("  - Debug output folders")
