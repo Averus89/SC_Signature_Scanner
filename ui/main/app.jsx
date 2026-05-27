@@ -33,8 +33,10 @@ function App() {
   const [scanMode, setScanMode] = useState('folder');
   const [liveStatus, setLiveStatus] = useState({ scStatus: 'missing', captureStatus: 'stopped' });
   const [liveRegionConfigured, setLiveRegionConfigured] = useState(false);
+  const [liveRegion, setLiveRegion] = useState(null);
   const [settings, setSettings] = useState({
     popupX: 1920, popupY: 1080, duration: 10, scale: 100, debug: false, debugFolder: '',
+    liveProbeHz: 30, liveLogNoSignature: false,
   });
   const settingsSaveTimer = useRef(null);
   const [bridgeReady, setBridgeReady] = useState(
@@ -84,6 +86,10 @@ function App() {
         if (typeof mode === 'string') setScanMode(mode);
         const cfg = await window.pywebview.api.is_live_region_configured();
         setLiveRegionConfigured(!!cfg);
+        if (cfg) {
+          const lr = await window.pywebview.api.get_live_region();
+          setLiveRegion(lr || null);
+        }
       } catch (modeErr) {
         console.error('failed to load scan_mode', modeErr);
       }
@@ -263,9 +269,15 @@ function App() {
       if (result && !result.ok) {
         alert(result.error || 'Failed to start live calibration');
       } else {
-        // Re-check the configured flag after the modal returns.
+        // Re-check the configured flag and re-fetch the region after the modal returns.
         const cfg = await window.pywebview.api.is_live_region_configured();
         setLiveRegionConfigured(!!cfg);
+        if (cfg) {
+          const lr = await window.pywebview.api.get_live_region();
+          setLiveRegion(lr || null);
+        } else {
+          setLiveRegion(null);
+        }
       }
     } catch (err) {
       console.error('calibrate_region_live failed', err);
@@ -344,6 +356,7 @@ function App() {
           {mod === 'region' && (
             <RegionPanel
               region={region}
+              liveRegion={liveRegion}
               pickRegion={pickRegion}
               pickRegionFromLive={pickRegionFromLive}
               clearRegion={clearRegion}
