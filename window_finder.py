@@ -1,6 +1,7 @@
-"""Locate the running Star Citizen window and return its client-area rect.
+"""Locate the running Star Citizen window for live capture.
 
-Used by live_capture to point mss.grab at the correct absolute screen rect.
+Used by live_capture to identify the SC hwnd for binding a
+Windows.Graphics.Capture session.
 """
 from __future__ import annotations
 
