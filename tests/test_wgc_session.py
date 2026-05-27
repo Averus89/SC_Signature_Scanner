@@ -6,25 +6,33 @@ import pytest
 from wgc_capture import WGCSession, WGCError
 
 
+class FakeCaptureControl:
+    """Stand-in for the CaptureControl object returned by start_free_threaded()."""
+
+    def __init__(self):
+        self.stop_called = 0
+
+    def stop(self):
+        self.stop_called += 1
+
+
 class FakeCaptureLib:
     """Stand-in for windows_capture.WindowsCapture.
 
     Mirrors the real library's API: a single `@event` decorator that routes
-    by function name to either `on_frame_arrived` or `on_closed`.
+    by function name, and `start_free_threaded()` returns a CaptureControl
+    object. The library instance itself has no stop() method — stopping
+    happens via the returned control.
     """
 
-    is_supported_return = True
-
-    def __init__(self, *, window_name=None, cursor_capture=None):
+    def __init__(self, *, window_name=None, window_hwnd=None, cursor_capture=None):
         self.window_name = window_name
+        self.window_hwnd = window_hwnd
         self.cursor_capture = cursor_capture
         self.frame_arrived_handler = None
         self.closed_handler = None
         self.start_called = False
-        self.stop_called = 0
-
-    def is_supported(self) -> bool:
-        return type(self).is_supported_return
+        self.control: FakeCaptureControl | None = None
 
     def event(self, fn):
         """Decorator: route by function name (mirrors windows-capture's API)."""
@@ -35,11 +43,10 @@ class FakeCaptureLib:
             self.closed_handler = fn
         return fn
 
-    def start_free_threaded(self):
+    def start_free_threaded(self) -> FakeCaptureControl:
         self.start_called = True
-
-    def stop(self):
-        self.stop_called += 1
+        self.control = FakeCaptureControl()
+        return self.control
 
 
 def _make_session(hwnd: int = 42) -> tuple[WGCSession, dict, MagicMock]:
@@ -56,17 +63,6 @@ def _make_session(hwnd: int = 42) -> tuple[WGCSession, dict, MagicMock]:
 
     session = WGCSession(hwnd, on_frame, capture_lib_factory=lib_factory)
     return session, fake_lib_holder, on_frame
-
-
-def test_start_raises_when_wgc_unsupported():
-    """is_supported() False → start() raises WGCError."""
-    session, holder, _ = _make_session()
-    FakeCaptureLib.is_supported_return = False
-    try:
-        with pytest.raises(WGCError):
-            session.start()
-    finally:
-        FakeCaptureLib.is_supported_return = True
 
 
 def test_start_registers_frame_callback_and_calls_start_free_threaded():
@@ -98,14 +94,17 @@ def test_frame_callback_invokes_on_frame_with_bgra_bytes():
 
 
 def test_stop_is_idempotent():
-    """Calling stop twice doesn't raise. Calling stop without start doesn't raise."""
+    """Calling stop twice doesn't raise. Calling stop without start doesn't raise.
+    stop() must call control.stop() (not lib.stop() — windows-capture has no
+    such method)."""
     session, holder, _ = _make_session()
     session.stop()  # before start — safe
     session.start()
     session.stop()
     session.stop()  # double stop — safe
     lib = holder["lib"]
-    assert lib.stop_called >= 1
+    assert lib.control is not None
+    assert lib.control.stop_called >= 1
 
 
 def test_on_closed_marks_session_inactive():
@@ -116,3 +115,19 @@ def test_on_closed_marks_session_inactive():
     lib = holder["lib"]
     lib.closed_handler()
     assert session.is_active is False
+
+
+def test_stop_calls_capture_control_stop_not_lib_stop():
+    """Real windows-capture library has no stop() on the WindowsCapture
+    instance — stop happens via the CaptureControl returned by
+    start_free_threaded(). Verify WGCSession routes accordingly."""
+    session, holder, _ = _make_session()
+    session.start()
+    lib = holder["lib"]
+    assert lib.control is not None
+    assert lib.control.stop_called == 0
+    session.stop()
+    assert lib.control.stop_called == 1
+    # Calling stop() again is safe — control was already torn down.
+    session.stop()
+    assert lib.control.stop_called == 1  # not double-called

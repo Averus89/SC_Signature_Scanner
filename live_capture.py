@@ -102,16 +102,19 @@ def compute_abs_capture_rect(
     client_rect: tuple[int, int, int, int],
     region_window_rel: tuple[int, int, int, int],
 ) -> Optional[tuple[int, int, int, int]]:
-    """Translate a window-relative ROI into an absolute screen rect for mss.grab.
+    """Clamp a window-relative ROI to a client rectangle.
 
     Args:
-        client_rect: (x, y, w, h) of the SC client area in screen coords.
-        region_window_rel: (x1, y1, x2, y2) of the ROI in coordinates relative
-            to the client area's top-left.
+        client_rect: (x, y, w, h) — the SC client area. In the WGC path
+            this is (0, 0, frame_w, frame_h) because the captured frame's
+            origin IS the client area's top-left.
+        region_window_rel: (x1, y1, x2, y2) — the calibrated ROI in
+            window-relative coordinates.
 
     Returns:
-        (left, top, width, height) for mss.grab(), or None if the ROI clamps
-        to a degenerate area (smaller than MIN_ROI_W × MIN_ROI_H).
+        (left, top, width, height) of the clamped ROI for downstream
+        cropping, or None if the result is degenerate (smaller than
+        MIN_ROI_W × MIN_ROI_H).
     """
     cx, cy, cw, ch = client_rect
     x1, y1, x2, y2 = region_window_rel

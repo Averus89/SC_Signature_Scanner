@@ -50,6 +50,7 @@ class WGCSession:
         self._on_frame_user = on_frame
         self._capture_lib_factory = capture_lib_factory
         self._lib: Optional[Any] = None
+        self._control: Optional[Any] = None
         self._is_active = False
         self._lock = threading.Lock()
 
@@ -60,18 +61,12 @@ class WGCSession:
     def start(self) -> None:
         """Create the underlying capture, register callbacks, start it.
 
-        Raises WGCError if WGC is unsupported on this system or the
-        underlying start call throws.
+        Raises WGCError if the underlying start call throws.
         """
         with self._lock:
             if self._is_active:
                 return
             lib = self._capture_lib_factory(self.hwnd)
-
-            if hasattr(lib, "is_supported") and not lib.is_supported():
-                raise WGCError(
-                    "Windows Graphics Capture is not supported on this system"
-                )
 
             # windows-capture uses a single @event decorator that routes by
             # function name — these names are part of the contract.
@@ -91,24 +86,30 @@ class WGCSession:
                     self._is_active = False
 
             try:
-                lib.start_free_threaded()
+                control = lib.start_free_threaded()
             except Exception as e:
                 raise WGCError(f"WGC session failed to start: {e}") from e
 
             self._lib = lib
+            self._control = control
             self._is_active = True
 
     def stop(self) -> None:
-        """Stop the capture. Idempotent and safe from any thread."""
+        """Stop the capture. Idempotent and safe from any thread.
+
+        Uses the CaptureControl returned by start_free_threaded() — the
+        WindowsCapture instance itself has no stop method.
+        """
         with self._lock:
-            lib = self._lib
+            control = self._control
             self._is_active = False
             self._lib = None
-        if lib is not None:
+            self._control = None
+        if control is not None:
             try:
-                lib.stop()
+                control.stop()
             except Exception:
-                # Best-effort cleanup; the library may already be torn down.
+                # Best-effort cleanup; the control may already be torn down.
                 pass
 
 
