@@ -14,8 +14,15 @@ from typing import Any, Callable, Literal, Optional
 
 from PIL import Image
 
+from wgc_capture import WGCError
+
 
 Decision = Literal["no_change", "ongoing", "stable_change"]
+
+# Live capture thresholds.
+# Number of ticks with no frame before flipping to error status —
+# ~3 sec at the default 30 Hz probe rate.
+_NO_FRAME_ERROR_THRESHOLD = 90
 
 
 class StabilityTracker:
@@ -140,16 +147,11 @@ def _crop_bgra(
     return (b"".join(rows), x2 - x1, y2 - y1)
 
 
-Status = Literal["stopped", "waiting", "idle_minimized", "idle_occluded", "running", "error"]
+Status = Literal["stopped", "waiting", "idle_minimized", "running", "error"]
 
 
-# These imports stay lazy so the unit tests don't need win32 / mss installed
+# These imports stay lazy so the unit tests don't need win32 installed
 # to exercise the pure logic.
-def _default_mss_factory():
-    import mss
-    return mss.mss()
-
-
 def _default_find_sc_window():
     from window_finder import find_sc_window
     return find_sc_window()
@@ -160,23 +162,10 @@ def _default_load_window_region():
     return region_selector.load_window_region()
 
 
-def _default_window_from_point(pt: tuple[int, int]) -> int:
-    """Return the top-level (root) hwnd at the given screen point, or 0.
-
-    Used to detect when SC is occluded by another window at the capture
-    point — mss.grab is a desktop screen-scrape and returns the topmost
-    pixel content, so we must check that SC is actually on top before
-    interpreting captured bytes as HUD content.
-    """
-    import win32gui
-    GA_ROOT = 2
-    try:
-        hwnd = win32gui.WindowFromPoint(pt)
-        if not hwnd:
-            return 0
-        return win32gui.GetAncestor(hwnd, GA_ROOT) or hwnd
-    except Exception:
-        return 0
+def _default_wgc_session_factory(hwnd, on_frame):
+    """Construct a real WGCSession bound to `hwnd` for `on_frame` callbacks."""
+    from wgc_capture import WGCSession
+    return WGCSession(hwnd, on_frame)
 
 
 class LiveCapture:
@@ -191,8 +180,7 @@ class LiveCapture:
         emit: Callable[..., None],
         find_sc_window: Callable[[], Any] = _default_find_sc_window,
         load_window_region: Callable[[], Any] = _default_load_window_region,
-        mss_factory: Callable[[], Any] = _default_mss_factory,
-        window_from_point: Callable[[tuple[int, int]], int] = _default_window_from_point,
+        wgc_session_factory: Callable[[int, Callable[[bytes, int, int], None]], Any] = _default_wgc_session_factory,
         probe_hz: int = 30,
         stable_frames: int = 3,
         emit_empty: bool = False,
@@ -201,21 +189,21 @@ class LiveCapture:
         self.emit = emit
         self._find_sc_window = find_sc_window
         self._load_window_region = load_window_region
-        self._mss_factory = mss_factory
-        self._window_from_point = window_from_point
+        self._wgc_session_factory = wgc_session_factory
         self._emit_empty = emit_empty
 
         self._tick_period = 1.0 / probe_hz
         self._idle_period = 0.5  # waiting / idle_minimized
         self._tracker = StabilityTracker(stable_frames=stable_frames)
         self._status: Status = "stopped"
-        self._consecutive_grab_failures = 0
 
         self._region_window_rel: Optional[tuple[int, int, int, int]] = None
-        self._prev_client_rect: Optional[tuple[int, int, int, int]] = None
-        self._abs_capture_rect: Optional[tuple[int, int, int, int]] = None
 
-        self._mss: Any = None
+        self._wgc: Optional[Any] = None
+        self._wgc_hwnd: Optional[int] = None
+        self._frame_lock = threading.Lock()
+        self._latest_frame: Optional[tuple[bytes, int, int]] = None
+        self._ticks_without_frame: int = 0
         self._thread: Optional[threading.Thread] = None
         self._stop_event = threading.Event()
 
@@ -237,12 +225,7 @@ class LiveCapture:
 
     def start_for_tests(self) -> dict:
         """Initialize state without launching the thread — for unit tests."""
-        result = self._prepare_start()
-        if result["ok"]:
-            # Pre-create the mss context so tick() reuses a single instance,
-            # allowing FakeMss to dispense shots in sequence.
-            self._mss = self._mss_factory()
-        return result
+        return self._prepare_start()
 
     def _prepare_start(self) -> dict:
         region = self._load_window_region()
@@ -254,9 +237,6 @@ class LiveCapture:
             }
         self._region_window_rel = region
         self._tracker.reset()
-        self._prev_client_rect = None
-        self._abs_capture_rect = None
-        self._consecutive_grab_failures = 0
         self._status = "waiting"
         return {"ok": True}
 
@@ -265,107 +245,139 @@ class LiveCapture:
         if self._thread:
             self._thread.join(timeout=2.0)
         self._thread = None
-        self._mss = None
+        self._stop_wgc()
         self._status = "stopped"
 
     # ---- Loop -----------------------------------------------------------------
 
     def _run(self) -> None:
-        self._mss = self._mss_factory()
+        """Tick loop main. Owns the WGC session lifecycle."""
         try:
             while not self._stop_event.is_set():
                 start = time.monotonic()
-                next_period = self.tick()
+                period = self.tick()
                 elapsed = time.monotonic() - start
-                remaining = max(0.0, next_period - elapsed)
-                self._stop_event.wait(remaining)
+                remaining = max(0.0, period - elapsed)
+                if self._stop_event.wait(remaining):
+                    break
         finally:
-            self._mss = None
+            self._stop_wgc()
+
+    def _start_wgc(self, hwnd: int) -> None:
+        """Bind a fresh WGC session to `hwnd`. Raises WGCError on failure."""
+        self._stop_wgc()
+        with self._frame_lock:
+            self._latest_frame = None
+        self._ticks_without_frame = 0
+
+        def on_frame(raw: bytes, w: int, h: int) -> None:
+            with self._frame_lock:
+                self._latest_frame = (raw, w, h)
+
+        self._wgc = self._wgc_session_factory(hwnd, on_frame)
+        self._wgc.start()
+        self._wgc_hwnd = hwnd
+
+    def _stop_wgc(self) -> None:
+        """Tear down the active WGC session if any. Idempotent."""
+        wgc = self._wgc
+        self._wgc = None
+        self._wgc_hwnd = None
+        with self._frame_lock:
+            self._latest_frame = None
+        self._ticks_without_frame = 0
+        if wgc is not None:
+            try:
+                wgc.stop()
+            except Exception:
+                pass
 
     def tick(self) -> float:
-        """Run one probe iteration. Returns the desired sleep before next tick."""
-        if self._region_window_rel is None:
-            self._status = "error"
-            return self._idle_period
-
+        """One probe iteration. Returns the sleep period until next tick."""
         try:
             info = self._find_sc_window()
         except Exception:
             info = None
 
         if info is None:
+            self._stop_wgc()
             self._tracker.reset()
-            self._prev_client_rect = None
-            self._abs_capture_rect = None
             self._status = "waiting"
             return self._idle_period
 
         if info.is_minimized:
+            self._stop_wgc()
             self._status = "idle_minimized"
             return self._idle_period
 
-        if info.client_rect != self._prev_client_rect:
-            self._abs_capture_rect = compute_abs_capture_rect(
-                info.client_rect, self._region_window_rel
-            )
-            self._prev_client_rect = info.client_rect
+        if info.hwnd != self._wgc_hwnd:
+            try:
+                self._start_wgc(info.hwnd)
+            except WGCError as e:
+                self._status = "error"
+                if self._emit_empty:
+                    self.emit({"error": f"WGC session failed: {e}"}, source="live")
+                return self._idle_period
             self._tracker.reset()
 
-        if self._abs_capture_rect is None:
+        if self._wgc is None or not self._wgc.is_active:
             self._status = "error"
             return self._idle_period
 
-        # Occlusion check: mss.grab is a desktop screen-scrape and returns
-        # whatever window is topmost at the captured pixels. If SC isn't
-        # the topmost window at the center of our capture rect, the bytes
-        # we'd grab are from a different window (Explorer, an OSD, the
-        # taskbar, etc.) — interpreting them as HUD content produces
-        # garbage OCR. Skip the capture and surface the state to the UI.
-        cx, cy, cw, ch = self._abs_capture_rect
-        center_pt = (cx + cw // 2, cy + ch // 2)
-        top_root = self._window_from_point(center_pt)
-        if top_root and top_root != info.hwnd:
-            self._tracker.reset()
-            self._status = "idle_occluded"
+        with self._frame_lock:
+            frame = self._latest_frame
+
+        if frame is None:
+            self._ticks_without_frame += 1
+            if self._ticks_without_frame >= _NO_FRAME_ERROR_THRESHOLD:
+                self._status = "error"
+                if self._emit_empty:
+                    self.emit(
+                        {"error": "WGC session running but no frames received"},
+                        source="live",
+                    )
+                return self._idle_period
+            self._status = "running"
+            return self._tick_period
+
+        self._ticks_without_frame = 0
+        raw_bgra, frame_w, frame_h = frame
+
+        abs_roi = compute_abs_capture_rect(
+            (0, 0, frame_w, frame_h), self._region_window_rel
+        )
+        if abs_roi is None:
+            self._status = "error"
+            if self._emit_empty:
+                self.emit(
+                    {"error": "Live region out of bounds — recalibrate"},
+                    source="live",
+                )
             return self._idle_period
 
-        try:
-            shot = (self._mss or self._mss_factory()).grab({
-                "left": self._abs_capture_rect[0],
-                "top": self._abs_capture_rect[1],
-                "width": self._abs_capture_rect[2],
-                "height": self._abs_capture_rect[3],
-            })
-        except Exception:
-            self._consecutive_grab_failures += 1
-            if self._consecutive_grab_failures >= 3:
-                self._status = "error"
-            return self._tick_period
-        self._consecutive_grab_failures = 0
+        left, top, roi_w, roi_h = abs_roi
+        roi_bytes, _, _ = _crop_bgra(
+            raw_bgra, frame_w, frame_h, (left, top, left + roi_w, top + roi_h)
+        )
 
-        raw = bytes(shot.raw)
-        digest = hashlib.blake2b(raw, digest_size=8).digest()
+        digest = hashlib.blake2b(roi_bytes, digest_size=8).digest()
         decision = self._tracker.observe(digest)
         self._status = "running"
 
         if decision != "stable_change":
             return self._tick_period
 
-        img = Image.frombytes("RGB", (shot.width, shot.height), raw, "raw", "BGRX")
         try:
-            result = self.scanner.scan_pil_image(
-                img, region=(0, 0, shot.width, shot.height)
-            )
+            img = Image.frombytes("RGB", (roi_w, roi_h), roi_bytes, "raw", "BGRX")
+            result = self.scanner.scan_pil_image(img, region=(0, 0, roi_w, roi_h))
         except Exception as e:
-            self.emit({"error": f"Live scan failed: {e}"}, source="live")
+            if self._emit_empty:
+                self.emit({"error": f"frame decode/OCR failed: {e}"}, source="live")
             return self._tick_period
 
         if result is None or result.get("error") or not result.get("matches"):
-            # Blank / no-lock — re-arm so the same content can fire later.
             self._tracker.empty_rearm()
             if self._emit_empty:
-                # Power-user diagnostic: surface no-signature stable frames so
-                # the detection log shows the loop is actually probing.
                 self.emit(result or {"error": "No signature detected"}, source="live")
             return self._tick_period
 
