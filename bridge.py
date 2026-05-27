@@ -164,6 +164,23 @@ class Bridge:
         import region_selector
         return region_selector.is_window_region_configured()
 
+    def get_live_region(self) -> Optional[dict[str, int]]:
+        """Return the saved window-relative scan region, or None if unset.
+
+        Shape mirrors `get_scan_region` (x1/y1/x2/y2/width/height) so the
+        REGION module can render it with the same Readout markup as the
+        screen-pixel region.
+        """
+        import region_selector
+        rect = region_selector.load_window_region()
+        if rect is None:
+            return None
+        x1, y1, x2, y2 = rect
+        return {
+            "x1": x1, "y1": y1, "x2": x2, "y2": y2,
+            "width": x2 - x1, "height": y2 - y1,
+        }
+
     # ---- Folder picker ------------------------------------------------------
 
     def _start_dir(self, prefer: str) -> Optional[str]:

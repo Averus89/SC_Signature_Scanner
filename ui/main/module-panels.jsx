@@ -2,14 +2,16 @@
 const { useState } = React;
 
 // ============ REGION PANEL ============
-function RegionPanel({ region, pickRegion, pickRegionFromLive, clearRegion, bridgeReady, busy }) {
+function RegionPanel({ region, liveRegion, pickRegion, pickRegionFromLive, clearRegion, bridgeReady, busy }) {
   const r = region || null;
+  const lr = liveRegion || null;
   return (
     <div className="region-grid">
       <Panel title="SCAN REGION CALIBRATION" code="REG-05" accent="var(--amber)">
         <div className="region-instructions">
           <Stencil>STEP 01</Stencil> Click PICK REGION — choose a screenshot, drag a rectangle over the in-game signature value, click Save.
           <br /><Stencil>STEP 02</Stencil> The scanner reads OCR from this rectangle on every screenshot. Calibration persists across sessions.
+          <br /><Stencil>LIVE</Stencil> Use PICK FROM LIVE FRAME instead to calibrate window-relative coords for LIVE scan mode.
         </div>
         <div style={{ marginTop: 16, display: 'flex', gap: 8 }}>
           <MrButton small primary onClick={pickRegion} disabled={!bridgeReady || busy}>
@@ -22,7 +24,7 @@ function RegionPanel({ region, pickRegion, pickRegionFromLive, clearRegion, brid
         </div>
       </Panel>
 
-      <Panel title="REGION DATA" code="REG-DAT" accent="var(--amber)">
+      <Panel title="REGION DATA (FOLDER MODE)" code="REG-DAT" accent="var(--amber)">
         <div className="region-data">
           <Readout label="TOP-LEFT"     value={r ? `${r.x1}, ${r.y1}` : '—'} />
           <Readout label="BOTTOM-RIGHT" value={r ? `${r.x2}, ${r.y2}` : '—'} />
@@ -30,6 +32,17 @@ function RegionPanel({ region, pickRegion, pickRegionFromLive, clearRegion, brid
           <Readout label="STATUS"
                    value={r ? 'LOCKED' : 'UNSET'}
                    accent={r ? 'var(--green)' : 'var(--red)'} glow />
+        </div>
+      </Panel>
+
+      <Panel title="LIVE REGION DATA (WINDOW-RELATIVE)" code="REG-LIV" accent="var(--amber)">
+        <div className="region-data">
+          <Readout label="TOP-LEFT"     value={lr ? `${lr.x1}, ${lr.y1}` : '—'} />
+          <Readout label="BOTTOM-RIGHT" value={lr ? `${lr.x2}, ${lr.y2}` : '—'} />
+          <Readout label="SIZE"         value={lr ? `${lr.width}×${lr.height}` : '—'} />
+          <Readout label="STATUS"
+                   value={lr ? 'LOCKED' : 'UNSET'}
+                   accent={lr ? 'var(--green)' : 'var(--red)'} glow />
         </div>
       </Panel>
     </div>
