@@ -27,6 +27,6 @@ watchdog>=3.0.0
 pywebview>=6.2.0
 
 # ===== Live window capture (v6.1+) =====
-mss>=9.0.0
+windows-capture>=2.0.0
 pywin32>=306
 psutil>=5.9.0
