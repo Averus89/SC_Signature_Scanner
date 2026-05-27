@@ -35,7 +35,10 @@ function App() {
   });
   const settingsSaveTimer = useRef(null);
   const [bridgeReady, setBridgeReady] = useState(
-    typeof window !== 'undefined' && !!window.pywebview && !!window.pywebview.api
+    typeof window !== 'undefined'
+    && !!window.pywebview
+    && !!window.pywebview.api
+    && typeof window.pywebview.api.get_initial_state === 'function'
   );
 
   const latest = detections[detections.length - 1] || null;

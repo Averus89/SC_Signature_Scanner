@@ -42,6 +42,7 @@ datas = [
     # paths.get_base_path() / 'ui' / 'main' (or 'overlay') / 'index.html'.
     (str(PROJECT_ROOT / 'ui' / 'main'), 'ui/main'),
     (str(PROJECT_ROOT / 'ui' / 'overlay'), 'ui/overlay'),
+    (str(PROJECT_ROOT / 'ui' / 'vendor'), 'ui/vendor'),
 ]
 
 # Add EasyOCR character files if found
