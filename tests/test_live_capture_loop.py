@@ -194,3 +194,61 @@ def test_stop_returns_to_stopped():
     live.start_for_tests()
     live.stop()
     assert live.status == "stopped"
+
+
+def test_emit_empty_true_surfaces_no_signature_to_emit():
+    """With emit_empty=True, a stable frame whose OCR returns no signature still
+    fires the emit callback so the detection log shows the loop is alive."""
+    win = WindowInfo(hwnd=1, client_rect=(0, 0, 1920, 1080), is_minimized=False, is_foreground=True)
+    same_bytes = b"\x77" * (100 * 30 * 4)
+    shots = [FakeShot(same_bytes, 100, 30) for _ in range(3)]
+
+    finder = MagicMock(return_value=win)
+    scanner = MagicMock()
+    scanner.scan_pil_image.return_value = None  # OCR found nothing
+    emit = MagicMock()
+    live = LiveCapture(
+        scanner=scanner,
+        emit=emit,
+        find_sc_window=finder,
+        load_window_region=lambda: (0, 0, 100, 30),
+        mss_factory=lambda: FakeMss(shots),
+        probe_hz=30,
+        stable_frames=2,
+        emit_empty=True,
+    )
+    live.start_for_tests()
+    live.tick()  # ongoing
+    live.tick()  # stable_change → OCR returns None → emit fires anyway
+    emit.assert_called_once()
+    payload = emit.call_args.args[0]
+    # Synthesized error payload when result is None.
+    assert "error" in payload
+    assert emit.call_args.kwargs == {"source": "live"}
+
+
+def test_emit_empty_false_suppresses_no_signature_default_behavior():
+    """Default emit_empty=False: stable no-signature frames are silent
+    (regression guard for the v6.1.0 default behavior)."""
+    win = WindowInfo(hwnd=1, client_rect=(0, 0, 1920, 1080), is_minimized=False, is_foreground=True)
+    same_bytes = b"\x77" * (100 * 30 * 4)
+    shots = [FakeShot(same_bytes, 100, 30) for _ in range(3)]
+
+    finder = MagicMock(return_value=win)
+    scanner = MagicMock()
+    scanner.scan_pil_image.return_value = None
+    emit = MagicMock()
+    live = LiveCapture(
+        scanner=scanner,
+        emit=emit,
+        find_sc_window=finder,
+        load_window_region=lambda: (0, 0, 100, 30),
+        mss_factory=lambda: FakeMss(shots),
+        probe_hz=30,
+        stable_frames=2,
+        # emit_empty defaults to False — do not pass.
+    )
+    live.start_for_tests()
+    live.tick()
+    live.tick()
+    emit.assert_not_called()
