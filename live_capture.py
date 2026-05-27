@@ -123,6 +123,23 @@ def compute_abs_capture_rect(
     return (cx + x1, cy + y1, w, h)
 
 
+def _crop_bgra(
+    buf: bytes,
+    frame_w: int,
+    frame_h: int,
+    region: tuple[int, int, int, int],
+) -> tuple[bytes, int, int]:
+    """Crop a BGRA pixel buffer to (x1, y1, x2, y2). Returns (roi_bytes, w, h).
+
+    Pure-Python row slicing. Caller must ensure the region is already clamped
+    inside (0, 0, frame_w, frame_h) — compute_abs_capture_rect handles this.
+    """
+    x1, y1, x2, y2 = region
+    stride = frame_w * 4
+    rows = [buf[y * stride + x1 * 4 : y * stride + x2 * 4] for y in range(y1, y2)]
+    return (b"".join(rows), x2 - x1, y2 - y1)
+
+
 Status = Literal["stopped", "waiting", "idle_minimized", "idle_occluded", "running", "error"]
 
 
