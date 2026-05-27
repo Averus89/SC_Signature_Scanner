@@ -1,7 +1,12 @@
 // Scanner module — folder monitoring + detection log + reveal animation
 const { useState, useEffect, useRef } = React;
 
-function ScannerPanel({ detections, monitoring, toggleMonitoring, simulateDetection, screenshotFolder, setScreenshotFolder, browseFolder, bridgeReady, latest }) {
+function ScannerPanel({
+  detections, monitoring, toggleMonitoring, simulateDetection,
+  screenshotFolder, setScreenshotFolder, browseFolder, bridgeReady, latest,
+  scanMode = 'folder', setScanMode = () => {}, liveStatus = {},
+  liveRegionConfigured = false,
+}) {
   const [scrolling, setScrolling] = useState(true);
   const logRef = useRef(null);
   useEffect(() => {
@@ -18,18 +23,61 @@ function ScannerPanel({ detections, monitoring, toggleMonitoring, simulateDetect
 
       <div className="scanner-right">
         <Panel title="MONITOR CONTROL" code="MON-02" accent="var(--amber)">
-          <div className="mon-folder">
-            <div className="mon-label">SCREENSHOT FOLDER</div>
-            <div className="mon-folder-row">
-              <input className="mr-input" value={screenshotFolder} onChange={e => setScreenshotFolder(e.target.value)} />
-              <MrButton small icon="▸" onClick={browseFolder} disabled={!bridgeReady}>BROWSE</MrButton>
-            </div>
+          <div className="mon-mode-toggle" style={{ display: 'flex', gap: 8, marginBottom: 12 }}>
+            <MrButton
+              small
+              primary={scanMode === 'folder'}
+              onClick={() => setScanMode('folder')}
+              disabled={!bridgeReady}
+            >FOLDER</MrButton>
+            <MrButton
+              small
+              primary={scanMode === 'live'}
+              onClick={() => setScanMode('live')}
+              disabled={!bridgeReady}
+            >LIVE</MrButton>
           </div>
+          {scanMode === 'folder' && (
+            <div className="mon-folder">
+              <div className="mon-label">SCREENSHOT FOLDER</div>
+              <div className="mon-folder-row">
+                <input className="mr-input" value={screenshotFolder} onChange={e => setScreenshotFolder(e.target.value)} />
+                <MrButton small icon="▸" onClick={browseFolder} disabled={!bridgeReady}>BROWSE</MrButton>
+              </div>
+            </div>
+          )}
+          {scanMode === 'live' && (
+            <div className="mon-live-status" style={{ marginBottom: 12 }}>
+              <Readout
+                label="STAR CITIZEN"
+                value={liveStatus.scStatus === 'running' ? 'DETECTED' :
+                       liveStatus.scStatus === 'minimized' ? 'MINIMIZED' : 'NOT RUNNING'}
+                accent={liveStatus.scStatus === 'running' ? 'var(--green)' :
+                        liveStatus.scStatus === 'minimized' ? 'var(--amber)' : 'var(--red)'}
+                glow
+              />
+              <Readout
+                label="LIVE REGION"
+                value={liveRegionConfigured ? 'CALIBRATED' : 'NOT SET'}
+                accent={liveRegionConfigured ? 'var(--green)' : 'var(--red)'}
+                glow
+              />
+            </div>
+          )}
           <div className="mon-state">
             <div className={`mon-status ${monitoring ? 'on' : 'off'}`}>
               <div className="mon-pulse"><span /><span /><span /></div>
               <div>
-                <div className="mon-status-label">{monitoring ? 'MONITORING' : 'STANDBY'}</div>
+                <div className="mon-status-label">
+                  {!monitoring ? 'STANDBY' :
+                   scanMode === 'live' ? (
+                     liveStatus.captureStatus === 'running' ? 'LIVE · 30 Hz' :
+                     liveStatus.captureStatus === 'waiting' ? 'WAITING FOR SC' :
+                     liveStatus.captureStatus === 'idle_minimized' ? 'IDLE (MINIMIZED)' :
+                     liveStatus.captureStatus === 'error' ? 'ERROR' :
+                     'STARTING'
+                   ) : 'MONITORING'}
+                </div>
                 <div className="mon-status-sub">{detections.length} signatures processed</div>
               </div>
             </div>
