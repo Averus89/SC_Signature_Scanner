@@ -158,12 +158,14 @@ class LiveCapture:
         mss_factory: Callable[[], Any] = _default_mss_factory,
         probe_hz: int = 30,
         stable_frames: int = 3,
+        emit_empty: bool = False,
     ) -> None:
         self.scanner = scanner
         self.emit = emit
         self._find_sc_window = find_sc_window
         self._load_window_region = load_window_region
         self._mss_factory = mss_factory
+        self._emit_empty = emit_empty
 
         self._tick_period = 1.0 / probe_hz
         self._idle_period = 0.5  # waiting / idle_minimized
@@ -309,6 +311,10 @@ class LiveCapture:
         if result is None or result.get("error") or not result.get("matches"):
             # Blank / no-lock — re-arm so the same content can fire later.
             self._tracker.empty_rearm()
+            if self._emit_empty:
+                # Power-user diagnostic: surface no-signature stable frames so
+                # the detection log shows the loop is actually probing.
+                self.emit(result or {"error": "No signature detected"}, source="live")
             return self._tick_period
 
         self.emit(result, source="live")
