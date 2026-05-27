@@ -39,6 +39,7 @@ def _make_live(
     shots: Optional[list[FakeShot]] = None,
     region: Optional[tuple[int, int, int, int]] = (0, 0, 100, 30),
     scan_result: Optional[dict] = None,
+    window_from_point: Optional[object] = None,
 ) -> tuple[LiveCapture, MagicMock]:
     finder = MagicMock(return_value=window)
     scanner = MagicMock()
@@ -46,12 +47,18 @@ def _make_live(
     region_loader = MagicMock(return_value=region)
     emit = MagicMock()
     mss_factory = MagicMock(return_value=FakeMss(shots or [FakeShot(b"\x00" * (100 * 30 * 4), 100, 30)]))
+    # Default: pretend SC is always topmost at the capture point so the new
+    # occlusion check passes through. Tests that exercise the occlusion path
+    # pass their own window_from_point that returns a different hwnd.
+    if window_from_point is None:
+        window_from_point = lambda pt: (window.hwnd if window else 0)
     live = LiveCapture(
         scanner=scanner,
         emit=emit,
         find_sc_window=finder,
         load_window_region=region_loader,
         mss_factory=mss_factory,
+        window_from_point=window_from_point,
         probe_hz=30,
         stable_frames=2,
     )
@@ -124,6 +131,7 @@ def test_empty_ocr_result_re_arms_so_same_hash_fires_again():
         find_sc_window=finder,
         load_window_region=lambda: (0, 0, 100, 30),
         mss_factory=lambda: FakeMss(shots),
+        window_from_point=lambda pt: 1,
         probe_hz=30,
         stable_frames=2,
     )
@@ -168,6 +176,7 @@ def test_window_move_invalidates_hash_state():
         find_sc_window=finder,
         load_window_region=lambda: (0, 0, 100, 30),
         mss_factory=lambda: FakeMss(shots),
+        window_from_point=lambda pt: 1,
         probe_hz=30,
         stable_frames=2,
     )
@@ -213,6 +222,7 @@ def test_emit_empty_true_surfaces_no_signature_to_emit():
         find_sc_window=finder,
         load_window_region=lambda: (0, 0, 100, 30),
         mss_factory=lambda: FakeMss(shots),
+        window_from_point=lambda pt: 1,
         probe_hz=30,
         stable_frames=2,
         emit_empty=True,
@@ -225,6 +235,39 @@ def test_emit_empty_true_surfaces_no_signature_to_emit():
     # Synthesized error payload when result is None.
     assert "error" in payload
     assert emit.call_args.kwargs == {"source": "live"}
+
+
+def test_tick_skips_capture_when_sc_is_occluded_by_another_window():
+    """SC found, not minimized, but another window is topmost at the capture
+    point — skip capture so we don't OCR the occluder's pixels."""
+    win = WindowInfo(hwnd=1, client_rect=(0, 0, 1920, 1080), is_minimized=False, is_foreground=False)
+    # WindowFromPoint returns 999 (some other window's hwnd), not SC's hwnd=1.
+    live, emit = _make_live(window=win, window_from_point=lambda pt: 999)
+    live.start_for_tests()
+    live.tick()
+    assert live.status == "idle_occluded"
+    # scanner.scan_pil_image must NOT have been called — the bytes would be garbage.
+    live.scanner.scan_pil_image.assert_not_called()
+    # And emit must not fire either.
+    emit.assert_not_called()
+
+
+def test_tick_proceeds_when_sc_is_topmost_at_capture_point():
+    """SC IS topmost at the capture point — capture proceeds and (with stable
+    content + matched OCR) eventually emits."""
+    win = WindowInfo(hwnd=42, client_rect=(0, 0, 1920, 1080), is_minimized=False, is_foreground=True)
+    same_bytes = b"\x00" * (100 * 30 * 4)
+    shots = [FakeShot(same_bytes, 100, 30) for _ in range(3)]
+    scan_result = {"signature": 3540, "matches": [{"name": "x"}]}
+    live, emit = _make_live(
+        window=win, shots=shots, scan_result=scan_result,
+        window_from_point=lambda pt: 42,
+    )
+    live.start_for_tests()
+    live.tick()
+    live.tick()
+    assert live.status == "running"
+    emit.assert_called_once()
 
 
 def test_emit_empty_false_suppresses_no_signature_default_behavior():
@@ -244,6 +287,7 @@ def test_emit_empty_false_suppresses_no_signature_default_behavior():
         find_sc_window=finder,
         load_window_region=lambda: (0, 0, 100, 30),
         mss_factory=lambda: FakeMss(shots),
+        window_from_point=lambda pt: 1,
         probe_hz=30,
         stable_frames=2,
         # emit_empty defaults to False — do not pass.
