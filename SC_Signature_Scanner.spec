@@ -107,9 +107,8 @@ hiddenimports = [
     # SciPy (sometimes needed by torch/numpy)
     'scipy.ndimage',
 
-    # Live window capture (v6.1+)
-    'mss',
-    'mss.windows',
+    # Live window capture (v6.2+ — WGC via windows-capture)
+    'windows_capture',
     'win32gui',
     'win32process',
     'win32con',
@@ -117,14 +116,15 @@ hiddenimports = [
 ]
 
 # Collect all torch and torchvision submodules
-from PyInstaller.utils.hooks import collect_submodules, collect_data_files
+from PyInstaller.utils.hooks import collect_submodules, collect_data_files, collect_dynamic_libs
 
 hiddenimports += collect_submodules('PIL')
 hiddenimports += collect_submodules('torch')
 hiddenimports += collect_submodules('torchvision')
 hiddenimports += collect_submodules('easyocr')
 hiddenimports += collect_submodules('webview')
-hiddenimports += collect_submodules('mss')
+hiddenimports += collect_submodules('windows_capture')
+hiddenimports += collect_submodules('winrt')
 hiddenimports += collect_submodules('win32')  # pulls win32gui, win32process, etc.
 hiddenimports += collect_submodules('psutil')
 
@@ -136,10 +136,13 @@ datas += pil_datas
 datas += torch_datas
 datas += torchvision_datas
 
+# windows-capture ships a native .pyd from its Rust/PyO3 wheel.
+binaries_wgc = collect_dynamic_libs('windows_capture')
+
 a = Analysis(
     ['app_webview.py'],
     pathex=[str(PROJECT_ROOT)],
-    binaries=[],
+    binaries=binaries_wgc,
     datas=datas,
     hiddenimports=hiddenimports,
     hookspath=[],
