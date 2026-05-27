@@ -42,6 +42,7 @@ datas = [
     # paths.get_base_path() / 'ui' / 'main' (or 'overlay') / 'index.html'.
     (str(PROJECT_ROOT / 'ui' / 'main'), 'ui/main'),
     (str(PROJECT_ROOT / 'ui' / 'overlay'), 'ui/overlay'),
+    (str(PROJECT_ROOT / 'ui' / 'vendor'), 'ui/vendor'),
 ]
 
 # Add EasyOCR character files if found
@@ -105,6 +106,14 @@ hiddenimports = [
     
     # SciPy (sometimes needed by torch/numpy)
     'scipy.ndimage',
+
+    # Live window capture (v6.1+)
+    'mss',
+    'mss.windows',
+    'win32gui',
+    'win32process',
+    'win32con',
+    'psutil',
 ]
 
 # Collect all torch and torchvision submodules
@@ -115,6 +124,9 @@ hiddenimports += collect_submodules('torch')
 hiddenimports += collect_submodules('torchvision')
 hiddenimports += collect_submodules('easyocr')
 hiddenimports += collect_submodules('webview')
+hiddenimports += collect_submodules('mss')
+hiddenimports += collect_submodules('win32')  # pulls win32gui, win32process, etc.
+hiddenimports += collect_submodules('psutil')
 
 # Collect torch data files (e.g., CUDA libs if present)
 pil_datas = collect_data_files('PIL')

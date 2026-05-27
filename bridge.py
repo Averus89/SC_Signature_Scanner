@@ -23,6 +23,9 @@ import webview
 
 from config import Config
 from monitor import ScreenshotMonitor
+from live_capture import LiveCapture
+from window_finder import find_sc_window
+import mss
 import region_selector
 
 
@@ -46,6 +49,7 @@ class Bridge:
         self.scanner = scanner
         self.config = config
         self.monitor: Optional[ScreenshotMonitor] = None
+        self.live_capture: Optional[LiveCapture] = None
         self._main_window: Optional[webview.Window] = None
         self._overlay_window: Optional[webview.Window] = None
         self._overlay_prev_pos: Optional[tuple[int, int]] = None
@@ -101,6 +105,64 @@ class Bridge:
             "versionDev": CURRENT_VERSION,
             "ocrEngine": getattr(self.scanner, "engine_name", "—") if self.scanner else "—",
         }
+
+    def get_scan_mode(self) -> str:
+        cfg = self.config.load() or {}
+        mode = cfg.get("scan_mode", "folder")
+        return mode if mode in ("folder", "live") else "folder"
+
+    def set_scan_mode(self, mode: str) -> dict[str, Any]:
+        if mode not in ("folder", "live"):
+            return {"ok": False, "error": f"Unknown scan mode: {mode}"}
+        was_running = bool(
+            (self.monitor and self.monitor.is_running)
+            or (self.live_capture and self.live_capture.status != "stopped")
+        )
+        self.config.set("scan_mode", mode)
+        if was_running:
+            self.stop_engagement()
+            return self.start_engagement()
+        return {"ok": True}
+
+    def calibrate_region_live(self) -> dict[str, Any]:
+        """One-shot: grab the SC client area, open the region picker on that
+        image, persist the rect window-relative."""
+        info = find_sc_window()
+        if info is None:
+            return {"ok": False, "error": "Star Citizen not running"}
+
+        x, y, w, h = info.client_rect
+        with mss.mss() as sct:
+            shot = sct.grab({"left": x, "top": y, "width": w, "height": h})
+
+        from PIL import Image as _Image
+        img = _Image.frombytes(
+            "RGB", (shot.width, shot.height), bytes(shot.raw), "raw", "BGRX"
+        )
+
+        import region_selector
+        selector = region_selector.RegionSelector(parent=None)
+        selector.open(image=img, save_as_window_relative=True)
+        return {"ok": True}
+
+    def find_sc_window_status(self) -> dict[str, Any]:
+        """For the Scanner module's status pill."""
+        status = self.live_capture.status if self.live_capture else "stopped"
+        info = find_sc_window()
+        if info is None:
+            sc_status = "missing"
+        elif info.is_minimized:
+            sc_status = "minimized"
+        else:
+            sc_status = "running"
+        return {
+            "scStatus": sc_status,
+            "captureStatus": status,
+        }
+
+    def is_live_region_configured(self) -> bool:
+        import region_selector
+        return region_selector.is_window_region_configured()
 
     # ---- Folder picker ------------------------------------------------------
 
@@ -269,29 +331,47 @@ class Bridge:
 
     # ---- Monitoring ---------------------------------------------------------
 
-    def start_monitoring(self) -> dict[str, Any]:
-        cfg = self.config.load() or {}
-        folder = cfg.get("screenshot_folder", "")
-        if not folder or not Path(folder).is_dir():
-            return {
-                "ok": False,
-                "error": "Screenshot folder is not set or does not exist.",
-            }
-        if self.monitor and self.monitor.is_running:
-            return {"ok": True, "alreadyRunning": True}
+    def start_engagement(self) -> dict[str, Any]:
+        mode = self.get_scan_mode()
+        if mode == "live":
+            return self._start_live()
+        return self._start_folder()
 
-        self.monitor = ScreenshotMonitor(
-            folder=folder,
-            callback=self._on_screenshot,
-        )
-        self.monitor.start()
-        return {"ok": True}
-
-    def stop_monitoring(self) -> dict[str, Any]:
-        if self.monitor:
+    def stop_engagement(self) -> dict[str, Any]:
+        if self.live_capture is not None:
+            self.live_capture.stop()
+            self.live_capture = None
+        if self.monitor is not None:
             self.monitor.stop()
             self.monitor = None
         return {"ok": True}
+
+    # Backwards-compat aliases used by existing JS until UI migrates.
+    def start_monitoring(self) -> dict[str, Any]:
+        return self.start_engagement()
+
+    def stop_monitoring(self) -> dict[str, Any]:
+        return self.stop_engagement()
+
+    def _start_folder(self) -> dict[str, Any]:
+        cfg = self.config.load() or {}
+        folder = cfg.get("screenshot_folder", "")
+        if not folder or not Path(folder).is_dir():
+            return {"ok": False, "error": "Screenshot folder is not set or does not exist."}
+        if self.monitor and self.monitor.is_running:
+            return {"ok": True, "alreadyRunning": True}
+        self.monitor = ScreenshotMonitor(folder=folder, callback=self._on_screenshot)
+        self.monitor.start()
+        return {"ok": True}
+
+    def _start_live(self) -> dict[str, Any]:
+        if self.scanner is None:
+            return {"ok": False, "error": "Scanner not initialized"}
+        self.live_capture = LiveCapture(
+            scanner=self.scanner,
+            emit=self._on_live_result,
+        )
+        return self.live_capture.start()
 
     # ---- Window controls (frameless mode) -----------------------------------
 
@@ -718,6 +798,19 @@ class Bridge:
 
         # Show the overlay only when we have a real match — never for "NO LOCK"
         # or scan errors (the user doesn't want noise popups).
+        if not payload.get("error") and payload.get("matches"):
+            self._show_overlay(self._build_overlay_payload(payload))
+
+    def _on_live_result(self, result: dict[str, Any], *, source: str = "live") -> None:
+        """Callback fired on the LiveCapture thread when OCR produces a result.
+
+        Parallels _on_screenshot/_scan_and_push but starts from a result dict
+        rather than a file path. Uses 'live:<timestamp>' as the synthetic file
+        label so the detection log entry has a recognizable origin.
+        """
+        synthetic = Path(f"live:{datetime.now().strftime('%H%M%S')}")
+        payload = self._build_detection_payload(synthetic, result)
+        self._push_to_main("onDetection", payload)
         if not payload.get("error") and payload.get("matches"):
             self._show_overlay(self._build_overlay_payload(payload))
 

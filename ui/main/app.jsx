@@ -30,12 +30,18 @@ function App() {
   const [versionDev, setVersionDev] = useState('');
   const [screenshotFolder, setScreenshotFolder] = useState('');
   const [codexFilter, setCodexFilter] = useState('all');
+  const [scanMode, setScanMode] = useState('folder');
+  const [liveStatus, setLiveStatus] = useState({ scStatus: 'missing', captureStatus: 'stopped' });
+  const [liveRegionConfigured, setLiveRegionConfigured] = useState(false);
   const [settings, setSettings] = useState({
     popupX: 1920, popupY: 1080, duration: 10, scale: 100, debug: false, debugFolder: '',
   });
   const settingsSaveTimer = useRef(null);
   const [bridgeReady, setBridgeReady] = useState(
-    typeof window !== 'undefined' && !!window.pywebview && !!window.pywebview.api
+    typeof window !== 'undefined'
+    && !!window.pywebview
+    && !!window.pywebview.api
+    && typeof window.pywebview.api.get_initial_state === 'function'
   );
 
   const latest = detections[detections.length - 1] || null;
@@ -57,7 +63,7 @@ function App() {
       window.pywebview.api.get_settings(),
       window.pywebview.api.get_scan_region(),
       window.pywebview.api.get_signature_db(),
-    ]).then(([state, sets, reg, db]) => {
+    ]).then(async ([state, sets, reg, db]) => {
       if (state && typeof state.screenshotFolder === 'string') {
         setScreenshotFolder(state.screenshotFolder);
       }
@@ -72,6 +78,14 @@ function App() {
         window.SALVAGE = db.salvage || [];
         window.ALL_SIGNATURES = [...window.MINERALS, ...window.GROUND, ...window.SALVAGE]
           .sort((a, b) => a.sig - b.sig);
+      }
+      try {
+        const mode = await window.pywebview.api.get_scan_mode();
+        if (typeof mode === 'string') setScanMode(mode);
+        const cfg = await window.pywebview.api.is_live_region_configured();
+        setLiveRegionConfigured(!!cfg);
+      } catch (modeErr) {
+        console.error('failed to load scan_mode', modeErr);
       }
     }).catch(err => console.error('bootstrap failed', err));
   }, [bridgeReady]);
@@ -116,6 +130,23 @@ function App() {
     };
     return () => { delete window.onDetection; };
   }, [ingestSig]);
+
+  // Poll live capture status every 1 s while in live mode
+  useEffect(() => {
+    if (!bridgeReady || scanMode !== 'live') return;
+    let cancelled = false;
+    const tick = async () => {
+      try {
+        const s = await window.pywebview.api.find_sc_window_status();
+        if (!cancelled && s) setLiveStatus(s);
+      } catch (err) {
+        console.error('find_sc_window_status failed', err);
+      }
+    };
+    tick();
+    const id = setInterval(tick, 1000);
+    return () => { cancelled = true; clearInterval(id); };
+  }, [bridgeReady, scanMode]);
 
   // Toggle monitoring through the bridge
   const toggleMonitoring = useCallback(async () => {
@@ -209,6 +240,38 @@ function App() {
     }
   }, [bridgeReady]);
 
+  const changeScanMode = useCallback(async (newMode) => {
+    if (!bridgeReady || newMode === scanMode) return;
+    setScanMode(newMode);
+    try {
+      const result = await window.pywebview.api.set_scan_mode(newMode);
+      if (result && !result.ok) {
+        console.error('set_scan_mode failed', result.error);
+      }
+      // If we just switched mode while monitoring was on, the bridge restarts
+      // engagement under the new mode. Reflect that in our local 'monitoring' flag.
+      if (result && result.ok && result.alreadyRunning) setMonitoring(true);
+    } catch (err) {
+      console.error('set_scan_mode failed', err);
+    }
+  }, [bridgeReady, scanMode]);
+
+  const pickRegionFromLive = useCallback(async () => {
+    if (!bridgeReady) return;
+    try {
+      const result = await window.pywebview.api.calibrate_region_live();
+      if (result && !result.ok) {
+        alert(result.error || 'Failed to start live calibration');
+      } else {
+        // Re-check the configured flag after the modal returns.
+        const cfg = await window.pywebview.api.is_live_region_configured();
+        setLiveRegionConfigured(!!cfg);
+      }
+    } catch (err) {
+      console.error('calibrate_region_live failed', err);
+    }
+  }, [bridgeReady]);
+
   const placeOverlay = useCallback(() => {
     if (!bridgeReady) return;
     window.pywebview.api.enter_overlay_placement_mode().catch(err =>
@@ -272,12 +335,17 @@ function App() {
               browseFolder={browseFolder}
               bridgeReady={bridgeReady}
               latest={latest}
+              scanMode={scanMode}
+              setScanMode={changeScanMode}
+              liveStatus={liveStatus}
+              liveRegionConfigured={liveRegionConfigured}
             />
           )}
           {mod === 'region' && (
             <RegionPanel
               region={region}
               pickRegion={pickRegion}
+              pickRegionFromLive={pickRegionFromLive}
               clearRegion={clearRegion}
               bridgeReady={bridgeReady}
               busy={regionBusy}

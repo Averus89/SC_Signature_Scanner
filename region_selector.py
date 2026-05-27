@@ -15,6 +15,7 @@ import paths
 
 
 CONFIG_FILE = paths.get_user_data_path() / "scan_region.json"
+WINDOW_CONFIG_FILE = paths.get_user_data_path() / "scan_region_window.json"
 
 
 def load_region() -> Optional[Tuple[int, int, int, int]]:
@@ -63,6 +64,48 @@ def is_configured() -> bool:
     return CONFIG_FILE.exists()
 
 
+def load_window_region() -> Optional[Tuple[int, int, int, int]]:
+    """Load the window-relative scan region.
+
+    Returns:
+        (x1, y1, x2, y2) in coordinates relative to the SC client area's
+        top-left, or None if not configured / file unreadable.
+    """
+    if WINDOW_CONFIG_FILE.exists():
+        try:
+            with open(WINDOW_CONFIG_FILE, 'r') as f:
+                data = json.load(f)
+                return (data['x1'], data['y1'], data['x2'], data['y2'])
+        except (json.JSONDecodeError, KeyError, IOError):
+            pass
+    return None
+
+
+def save_window_region(x1: int, y1: int, x2: int, y2: int) -> None:
+    """Persist a window-relative scan region."""
+    data = {
+        'x1': x1,
+        'y1': y1,
+        'x2': x2,
+        'y2': y2,
+        'width': x2 - x1,
+        'height': y2 - y1,
+    }
+    with open(WINDOW_CONFIG_FILE, 'w') as f:
+        json.dump(data, f, indent=2)
+
+
+def clear_window_region() -> None:
+    """Delete the window-relative scan region file."""
+    if WINDOW_CONFIG_FILE.exists():
+        WINDOW_CONFIG_FILE.unlink()
+
+
+def is_window_region_configured() -> bool:
+    """True if a window-relative scan region has been saved."""
+    return WINDOW_CONFIG_FILE.exists()
+
+
 class RegionSelector:
     """GUI for selecting scan region on a screenshot."""
     
@@ -89,33 +132,49 @@ class RegionSelector:
         
         self.root: Optional[tk.Toplevel] = None
         self.canvas: Optional[tk.Canvas] = None
+        self._save_as_window_relative: bool = False
     
-    def open(self, image_path: Optional[Path] = None):
+    def open(
+        self,
+        image_path: Optional[Path] = None,
+        *,
+        image: Optional[Image.Image] = None,
+        save_as_window_relative: bool = False,
+    ):
         """Open the region selector.
-        
+
         Args:
             image_path: Path to screenshot. If None, prompts user to select.
+            image: In-memory PIL Image. If provided, skips file load.
+            save_as_window_relative: If True, saves via save_window_region instead of save_region.
         """
-        # Get image path
-        if image_path is None:
-            image_path = filedialog.askopenfilename(
-                title="Select Screenshot",
-                filetypes=[
-                    ("Image files", "*.png *.jpg *.jpeg"),
-                    ("PNG files", "*.png"),
-                    ("JPEG files", "*.jpg *.jpeg"),
-                ]
-            )
-            if not image_path:
+        # Persist the save-mode flag so _save() knows which storage to use.
+        self._save_as_window_relative = save_as_window_relative
+
+        # Three call modes:
+        #   1. open(image=<PIL.Image>, save_as_window_relative=True) — live mode.
+        #   2. open(image_path=<Path>) — given file.
+        #   3. open() — prompt for a file.
+        if image is not None:
+            self.original_image = image
+        else:
+            if image_path is None:
+                picked = filedialog.askopenfilename(
+                    title="Select Screenshot",
+                    filetypes=[
+                        ("Image files", "*.png *.jpg *.jpeg"),
+                        ("PNG files", "*.png"),
+                        ("JPEG files", "*.jpg *.jpeg"),
+                    ],
+                )
+                if not picked:
+                    return
+                image_path = Path(picked)
+            try:
+                self.original_image = Image.open(image_path)
+            except Exception as e:
+                messagebox.showerror("Error", f"Failed to load image:\n{e}")
                 return
-            image_path = Path(image_path)
-        
-        # Load image
-        try:
-            self.original_image = Image.open(image_path)
-        except Exception as e:
-            messagebox.showerror("Error", f"Failed to load image:\n{e}")
-            return
         
         # Create window
         if self.parent:
@@ -334,13 +393,16 @@ class RegionSelector:
             return
         
         x1, y1, x2, y2 = self.selection
-        
+
         # Validate minimum size
         if (x2 - x1) < 20 or (y2 - y1) < 5:
             messagebox.showwarning("Region Too Small", "Please select a larger region.")
             return
-        
-        save_region(x1, y1, x2, y2)
+
+        if self._save_as_window_relative:
+            save_window_region(x1, y1, x2, y2)
+        else:
+            save_region(x1, y1, x2, y2)
         
         if self.on_save:
             self.on_save(x1, y1, x2, y2)

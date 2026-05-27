@@ -26,3 +26,7 @@ watchdog>=3.0.0
 # Uses Microsoft Edge WebView2 on Windows (preinstalled on Win10/11).
 pywebview>=6.2.0
 
+# ===== Live window capture (v6.1+) =====
+mss>=9.0.0
+pywin32>=306
+psutil>=5.9.0

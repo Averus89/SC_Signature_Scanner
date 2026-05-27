@@ -2,7 +2,7 @@
 const { useState } = React;
 
 // ============ REGION PANEL ============
-function RegionPanel({ region, pickRegion, clearRegion, bridgeReady, busy }) {
+function RegionPanel({ region, pickRegion, pickRegionFromLive, clearRegion, bridgeReady, busy }) {
   const r = region || null;
   return (
     <div className="region-grid">
@@ -14,6 +14,9 @@ function RegionPanel({ region, pickRegion, clearRegion, bridgeReady, busy }) {
         <div style={{ marginTop: 16, display: 'flex', gap: 8 }}>
           <MrButton small primary onClick={pickRegion} disabled={!bridgeReady || busy}>
             {busy ? 'PICKING…' : 'PICK REGION'}
+          </MrButton>
+          <MrButton small onClick={pickRegionFromLive} disabled={!bridgeReady || busy}>
+            PICK FROM LIVE FRAME
           </MrButton>
           <MrButton small onClick={clearRegion} disabled={!bridgeReady || !r || busy}>CLEAR</MrButton>
         </div>

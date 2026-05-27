@@ -158,32 +158,60 @@ class SignatureScanner:
         return self.debug_dir / f"{self._debug_prefix}{filename}"
     
     def scan_image(self, image_path: Path) -> Optional[Dict[str, Any]]:
-        """Scan an image for signature values.
-        
-        Requires fixed scan region (configured in Settings).
-        """
-        # Check OCR availability
+        """Scan an image file for signature values."""
         available, error = self.is_ocr_available()
         if not available:
             return {'error': f'OCR not available: {error}'}
-        
+
+        img = self._load_image(image_path)
+        if img is None:
+            return {'error': f'Failed to load image: {image_path.name}'}
+
         self.last_debug_info = {
             'image_path': str(image_path),
             'debug_files': [],
-            'method': None
+            'method': None,
         }
-        
-        # Generate timestamp prefix for this scan session
+        return self.scan_pil_image(img)
+
+    def scan_pil_image(
+        self,
+        img: Image.Image,
+        *,
+        region: Optional[Tuple[int, int, int, int]] = None,
+    ) -> Optional[Dict[str, Any]]:
+        """Scan an in-memory image.
+
+        Args:
+            img: The image to scan (already loaded, full RGB).
+            region: Explicit (x1, y1, x2, y2) within `img`. When provided, this
+                overrides the on-disk scan_region.json and is used as-is — live
+                mode passes (0, 0, w, h) because the image is already the ROI.
+                When None, falls back to region_selector.load_region().
+
+        Returns:
+            Same shape as the old scan_image: a dict with 'signature', 'matches',
+            'method', 'ocr_confidence', etc., or {'error': ...} on failure.
+        """
+        available, error = self.is_ocr_available()
+        if not available:
+            return {'error': f'OCR not available: {error}'}
+
+        # Generate timestamp prefix for this scan session (preserves existing
+        # debug-file behaviour for file-based scans).
         self._debug_prefix = datetime.now().strftime("%Y%m%d_%H%M%S_")
-        
+        # Ensure the bookkeeping dict exists even when scan_pil_image is called
+        # directly (e.g. by live mode), not via scan_image.
+        if not isinstance(getattr(self, 'last_debug_info', None), dict):
+            self.last_debug_info = {'debug_files': [], 'method': None}
+        else:
+            self.last_debug_info.setdefault('debug_files', [])
+            self.last_debug_info.setdefault('method', None)
+
         try:
-            img = self._load_image(image_path)
-            if img is None:
-                return {'error': f'Failed to load image: {image_path.name}'}
-            
             width, height = img.size
             self.last_debug_info['image_size'] = (width, height)
-            
+
             if self.debug_mode:
                 try:
                     self.debug_dir.mkdir(parents=True, exist_ok=True)
@@ -192,53 +220,45 @@ class SignatureScanner:
                     print(f"[DEBUG] Could not create debug dir {self.debug_dir}: {e}")
                     raise
                 img.save(self._debug_path("00_original.png"))
-                self.last_debug_info['debug_files'].append(f"{self._debug_prefix}00_original.png")
-            
-            # Check for fixed region
-            if region_selector.is_configured():
-                result = self._scan_with_fixed_region(img, width, height)
-                if result:
-                    self.last_debug_info['method'] = 'fixed_region'
-                    return result
-                if self.debug_mode:
-                    print("[DEBUG] Fixed region scan failed - no signature found")
-                return {'error': 'No signature detected in scan region'}
-            
-            # No scan region configured
-            return {'error': 'Scan region not configured. Define it in Settings.'}
-            
+                self.last_debug_info['debug_files'].append(
+                    f"{self._debug_prefix}00_original.png"
+                )
+
+            # Determine the region to scan: explicit > stored > error.
+            if region is not None:
+                x1, y1, x2, y2 = region
+            elif region_selector.is_configured():
+                x1, y1, x2, y2 = region_selector.load_region()
+            else:
+                return {'error': 'Scan region not configured. Define it in Settings.'}
+
+            # Clamp inside image (preserved from the old _scan_with_fixed_region).
+            x1 = max(0, min(x1, width - 1))
+            y1 = max(0, min(y1, height - 1))
+            x2 = max(0, min(x2, width))
+            y2 = max(0, min(y2, height))
+            if x2 <= x1 or y2 <= y1:
+                return {'error': 'Invalid scan region (degenerate after clamp)'}
+
+            if self.debug_mode:
+                print(f"[DEBUG] Using fixed region: ({x1}, {y1}) to ({x2}, {y2})")
+
+            result = self._scan_region(img, x1, y1, x2, y2, 'fixed')
+            if result:
+                self.last_debug_info['method'] = 'fixed_region'
+                return result
+            if self.debug_mode:
+                print("[DEBUG] Fixed region scan failed - no signature found")
+            return {'error': 'No signature detected in scan region'}
+
         except Exception as e:
             if self.debug_mode:
                 import traceback
                 with open(self._debug_path("99_error.txt"), 'w') as f:
                     f.write(traceback.format_exc())
             return {'error': str(e)}
-    
-    def _scan_with_fixed_region(self, img: Image.Image, width: int, height: int) -> Optional[Dict[str, Any]]:
-        """Scan using pre-configured fixed region."""
-        region = region_selector.load_region()
-        if not region:
-            return None
-        
-        x1, y1, x2, y2 = region
-        
-        # Validate region is within image bounds
-        x1 = max(0, min(x1, width - 1))
-        y1 = max(0, min(y1, height - 1))
-        x2 = max(0, min(x2, width))
-        y2 = max(0, min(y2, height))
-        
-        if x2 <= x1 or y2 <= y1:
-            if self.debug_mode:
-                print(f"[DEBUG] Invalid fixed region: ({x1}, {y1}) to ({x2}, {y2})")
-            return None
-        
-        if self.debug_mode:
-            print(f"[DEBUG] Using fixed region: ({x1}, {y1}) to ({x2}, {y2})")
-        
-        return self._scan_region(img, x1, y1, x2, y2, "fixed")
-    
-    def _scan_region(self, img: Image.Image, x1: int, y1: int, x2: int, y2: int, 
+
+    def _scan_region(self, img: Image.Image, x1: int, y1: int, x2: int, y2: int,
                      method: str) -> Optional[Dict[str, Any]]:
         """Scan a specific region for signature values."""
         if self.debug_mode:
