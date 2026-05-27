@@ -119,7 +119,7 @@ Internals:
 - Change-detection: `blake2b(raw_bgra, digest_size=8).digest()` on the captured bytes directly — no PIL conversion in the hot path.
 - Stability gate: emit OCR only when the new hash has been seen `stable_frames` consecutive times AND differs from `last_emitted_hash`. Tracks `last_seen_hash`/`seen_count` separately from `last_emitted_hash`.
 - Empty re-arm: if `scanner.scan_pil_image` returns no signatures, clear `last_emitted_hash` so the next non-blank stable read fires even if the value matches the previous one.
-- Window-move handling: when `client_rect` changes between ticks, recompute the absolute capture rect and clear all hash state.
+- Window-move handling: when `client_rect` (an `(x, y, w, h)` int tuple from Win32) changes between ticks, recompute the absolute capture rect and clear all hash state. See "Change-detection algorithms" in Data flow for the geometry-vs-content distinction.
 - Status changes emitted via callback into the bridge → `onStatusChange(...)` to the main React window.
 
 ### Scanner refactor
@@ -184,7 +184,8 @@ loop @ ~30 Hz:
        None        → state = waiting; clear hashes; sleep 500ms; continue
        minimized   → state = idle_minimized; sleep 500ms; continue
        else        → proceed
-  2. if info.client_rect != prev_client_rect:
+  2. if info.client_rect != prev_client_rect:        # exact tuple eq on
+        # (x, y, w, h) ints — see "Change-detection algorithms" below
         recompute abs_capture_rect from info.client_rect + region_window_rel
         last_seen_hash = None
         seen_count = 0
@@ -207,6 +208,49 @@ loop @ ~30 Hz:
 ```
 
 **ROI-only capture rationale:** a typical signature region is ~120×30 px; a full 2560×1440 client area is ~1000× larger. Grabbing only the ROI cuts memory-copy and hash work proportionally, keeping the 30 Hz loop near-idle in steady state.
+
+### Change-detection algorithms
+
+There are two distinct "did this change?" comparisons in the probe tick. They look superficially similar but solve different problems and use different algorithms.
+
+#### Layer 1 — Window geometry change (step 2)
+
+**Question:** did the user move or resize the SC window between ticks?
+
+**Inputs:** `info.client_rect` and `prev_client_rect`, each a 4-tuple of integers `(x, y, w, h)` reported by Win32 (`GetClientRect` + `ClientToScreen`). The OS returns whole-pixel values; there is no anti-aliasing or driver jitter at this layer.
+
+**Algorithm:** exact tuple equality (`info.client_rect == prev_client_rect`).
+
+**Why exact is correct:** the values are integers produced by the OS, not by sampling pixels. If the user nudges the window by one pixel, the tuple changes by one; if they don't, it doesn't. No tolerance is appropriate — even a one-pixel shift means the absolute capture rect is wrong and we should re-prime change detection.
+
+#### Layer 2 — Region content change (steps 4–6)
+
+**Question:** did the captured signature region's pixels change in a meaningful way?
+
+**Inputs:** the BGRA bytes of the captured ROI (`shot.raw`, ~w·h·4 bytes for a ~120×30 region — roughly 14 KB).
+
+**Algorithm:** byte-level `blake2b(raw, digest_size=8)` digest, then **strict equality** between consecutive digests, **gated by an N-frame stability counter** (`stable_frames=3`).
+
+**Why not exact equality alone:** you are correct that two captures of the "same" content can differ at the pixel level for reasons that have nothing to do with the signature value:
+- HUD animations / fading edges / cursor blink inside the ROI
+- Sub-pixel anti-aliasing of digits when the camera moves slightly
+- Compositor jitter from other on-screen windows (rare for borderless-windowed SC, but possible)
+- GPU driver dithering on some hardware
+
+A naïve "fire OCR whenever the hash changes" would re-fire OCR on every flicker.
+
+**How the stability counter solves it:** the loop tracks `last_seen_hash` (the most recent digest) and `seen_count` (how many ticks in a row that same digest has been observed). OCR fires only when `seen_count == stable_frames` **and** the now-stable digest differs from `last_emitted_hash` (the last digest that produced an emission). Flicker keeps resetting `seen_count` to 1; static content increments it. At 30 Hz with `stable_frames=3`, OCR fires ~100 ms after pixels settle — fast enough to feel live, slow enough to ignore one- and two-frame transients.
+
+**Empty re-arm:** if OCR returns no signatures (the region is blank — between rocks, looking at the sky, etc.), `last_emitted_hash` is cleared. The next stable read fires even if its hash happens to match a previously emitted one. This is what makes the same rock fire again when you look away and back.
+
+#### Pathological case: a region that never stabilizes
+
+If the calibrated region contains continuously animated content (e.g. a spinning HUD element that overlaps the signature box), `seen_count` will never reach `stable_frames` and OCR will never fire. Symptoms: live mode shows "RUNNING — 30 Hz" but the overlay never appears, even when a signature is visible.
+
+The spec does **not** silently work around this. If real-world testing shows it happens, the documented escape valves (in order of cost):
+1. Recalibrate the region tighter around the digit-only area in REGION → Calibrate from live frame.
+2. Raise `stable_frames` to 4 or 5 (small constant, easy tweak).
+3. Replace `blake2b` strict equality with a perceptual / fuzzy hash (e.g. `dhash` or downsample-then-`blake2b`) and compare with a Hamming-distance threshold — but only if 1 and 2 don't resolve it. Fuzzy hashing trades determinism for robustness, and the bug it solves is one we have no evidence of yet (YAGNI).
 
 ### Calibration flow
 
