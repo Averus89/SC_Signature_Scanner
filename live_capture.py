@@ -123,7 +123,7 @@ def compute_abs_capture_rect(
     return (cx + x1, cy + y1, w, h)
 
 
-Status = Literal["stopped", "waiting", "idle_minimized", "running", "error"]
+Status = Literal["stopped", "waiting", "idle_minimized", "idle_occluded", "running", "error"]
 
 
 # These imports stay lazy so the unit tests don't need win32 / mss installed
@@ -143,6 +143,25 @@ def _default_load_window_region():
     return region_selector.load_window_region()
 
 
+def _default_window_from_point(pt: tuple[int, int]) -> int:
+    """Return the top-level (root) hwnd at the given screen point, or 0.
+
+    Used to detect when SC is occluded by another window at the capture
+    point — mss.grab is a desktop screen-scrape and returns the topmost
+    pixel content, so we must check that SC is actually on top before
+    interpreting captured bytes as HUD content.
+    """
+    import win32gui
+    GA_ROOT = 2
+    try:
+        hwnd = win32gui.WindowFromPoint(pt)
+        if not hwnd:
+            return 0
+        return win32gui.GetAncestor(hwnd, GA_ROOT) or hwnd
+    except Exception:
+        return 0
+
+
 class LiveCapture:
     """Background capture loop. Probes the SC window at probe_hz and emits
     scan results via the supplied `emit` callback when content changes and
@@ -156,6 +175,7 @@ class LiveCapture:
         find_sc_window: Callable[[], Any] = _default_find_sc_window,
         load_window_region: Callable[[], Any] = _default_load_window_region,
         mss_factory: Callable[[], Any] = _default_mss_factory,
+        window_from_point: Callable[[tuple[int, int]], int] = _default_window_from_point,
         probe_hz: int = 30,
         stable_frames: int = 3,
         emit_empty: bool = False,
@@ -165,6 +185,7 @@ class LiveCapture:
         self._find_sc_window = find_sc_window
         self._load_window_region = load_window_region
         self._mss_factory = mss_factory
+        self._window_from_point = window_from_point
         self._emit_empty = emit_empty
 
         self._tick_period = 1.0 / probe_hz
@@ -275,6 +296,20 @@ class LiveCapture:
 
         if self._abs_capture_rect is None:
             self._status = "error"
+            return self._idle_period
+
+        # Occlusion check: mss.grab is a desktop screen-scrape and returns
+        # whatever window is topmost at the captured pixels. If SC isn't
+        # the topmost window at the center of our capture rect, the bytes
+        # we'd grab are from a different window (Explorer, an OSD, the
+        # taskbar, etc.) — interpreting them as HUD content produces
+        # garbage OCR. Skip the capture and surface the state to the UI.
+        cx, cy, cw, ch = self._abs_capture_rect
+        center_pt = (cx + cw // 2, cy + ch // 2)
+        top_root = self._window_from_point(center_pt)
+        if top_root and top_root != info.hwnd:
+            self._tracker.reset()
+            self._status = "idle_occluded"
             return self._idle_period
 
         try:

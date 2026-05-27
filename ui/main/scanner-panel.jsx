@@ -74,6 +74,7 @@ function ScannerPanel({
                      liveStatus.captureStatus === 'running' ? 'LIVE · 30 Hz' :
                      liveStatus.captureStatus === 'waiting' ? 'WAITING FOR SC' :
                      liveStatus.captureStatus === 'idle_minimized' ? 'IDLE (MINIMIZED)' :
+                     liveStatus.captureStatus === 'idle_occluded' ? 'SC OCCLUDED — FOCUS GAME' :
                      liveStatus.captureStatus === 'error' ? 'ERROR' :
                      'STARTING'
                    ) : 'MONITORING'}
