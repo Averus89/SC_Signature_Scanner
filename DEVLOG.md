@@ -49,6 +49,43 @@ The devlog shall always contain a clear "Current Status" or "Next Steps" section
 
 ## Changelog
 
+### 2026-05-27 — v6.2.0: WGC capture (replaces mss desktop-scrape)
+
+Branch `feat/wgc-capture`. Replaces `mss`-based desktop screen-scraping with Windows.Graphics.Capture via the `windows-capture` 2.0.0 Python library. WGC captures SC's swap-chain content directly regardless of Z-order, fixing the field bug where live mode returned the topmost window's pixels (Windows Settings UI, Explorer thumbnails) instead of SC's HUD.
+
+**1. Capture backend.** New `wgc_capture.py` wraps a `windows-capture` session. Runs WGC on the library's callback thread; pushes the most recent frame into a single-slot `(bytes, w, h)` storage under a lock. The existing `LiveCapture` tick loop reads that slot at `live_probe_hz`. Drop-newest semantics — frames between ticks are discarded naturally.
+
+**2. CPU-side ROI cropping.** New `_crop_bgra` pure helper crops a full-window BGRA buffer to the calibrated window-relative region. Cropping happens after readback for simplicity; ~20 KB of bytes per OCR-eligible frame.
+
+**3. Occlusion check removed.** PR #5's `WindowFromPoint` check + `idle_occluded` Status are deleted. WGC makes them obsolete; they were producing false negatives from transparent always-on-top overlays (NVIDIA, Steam, Discord, our own overlay window).
+
+**4. Calibration also moved to WGC.** `bridge.calibrate_region_live` replaces its `mss.mss().grab(client_rect)` one-shot with a short-lived WGC session that waits for the first frame (5-second timeout). Works under occlusion the same way the live loop does.
+
+**Files added:**
+- `wgc_capture.py` — `WGCSession`, `WGCError`, factory.
+- `tests/test_wgc_session.py` — 5 unit tests over a fake `windows_capture.WindowsCapture`.
+- `tests/test_wgc_crop.py` — 4 unit tests for `_crop_bgra`.
+
+**Files modified:**
+- `live_capture.py` — `mss_factory` / `window_from_point` → `wgc_session_factory`; tick rewrite; `idle_occluded` removed from `Status`.
+- `tests/test_live_capture_loop.py` — `FakeMss` → `FakeWGCSession`; 2 occlusion tests deleted; 3 new tests (warming up, warming-up-errors, ROI-clamp-degenerate).
+- `bridge.py` — `calibrate_region_live` rewrite.
+- `ui/main/scanner-panel.jsx` — drop "SC OCCLUDED — FOCUS GAME" label.
+- `ui/main/index.html` — cache-buster `v=44 → v=45`.
+- `requirements.txt` — `-mss` `+windows-capture>=2.0.0`.
+- `SC_Signature_Scanner.spec` — hidden imports + collect_submodules + collect_dynamic_libs for windows-capture and winrt.
+
+**Test suite:** 47 pytest cases (37 v6.1.0 baseline − 2 deleted occlusion tests + 5 WGC session + 4 crop + 3 new live-capture cases). Manual verification per `docs/manual-test-live-capture.md`.
+
+**Out of scope (future):**
+- GPU-side ROI cropping via D3D11 `CopySubresourceRegion` (perf optimization if CPU usage is high).
+- mss-as-fallback if WGC fails (not currently observed).
+- Per-window cursor inclusion toggle.
+
+**Version:** `6.1.0` → `6.2.0`.
+
+---
+
 ### 2026-05-27 — v6.1.0: Live window capture
 
 Branch `feat/live-window-capture`. Replaces the print-screen-to-folder workflow with optional live capture of the calibrated signature region directly from the running `starcitizen.exe` window at ~30 Hz. Folder-watch mode is preserved behind a Scanner-module toggle (FOLDER / LIVE); both feed the same downstream `bridge._scan_and_push` pipeline.
