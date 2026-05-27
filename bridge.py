@@ -25,7 +25,6 @@ from config import Config
 from monitor import ScreenshotMonitor
 from live_capture import LiveCapture
 from window_finder import find_sc_window
-import mss
 import region_selector
 
 
@@ -125,20 +124,40 @@ class Bridge:
         return {"ok": True}
 
     def calibrate_region_live(self) -> dict[str, Any]:
-        """One-shot: grab the SC client area, open the region picker on that
-        image, persist the rect window-relative."""
+        """One-shot: start a brief WGC session against the SC window, capture
+        the first delivered frame, hand it to the region picker, persist the
+        rect as window-relative."""
         info = find_sc_window()
         if info is None:
             return {"ok": False, "error": "Star Citizen not running"}
 
-        x, y, w, h = info.client_rect
-        with mss.mss() as sct:
-            shot = sct.grab({"left": x, "top": y, "width": w, "height": h})
+        import threading
+        from wgc_capture import WGCSession, WGCError
 
+        frame_ready = threading.Event()
+        captured: list[tuple[bytes, int, int]] = []
+
+        def cb(raw: bytes, w: int, h: int) -> None:
+            if captured:
+                return
+            captured.append((raw, w, h))
+            frame_ready.set()
+
+        session = WGCSession(info.hwnd, on_frame=cb)
+        try:
+            session.start()
+        except WGCError as e:
+            return {"ok": False, "error": str(e)}
+
+        ok = frame_ready.wait(timeout=5.0)
+        session.stop()
+
+        if not ok or not captured:
+            return {"ok": False, "error": "WGC didn't deliver a frame in 5 seconds"}
+
+        raw, w, h = captured[0]
         from PIL import Image as _Image
-        img = _Image.frombytes(
-            "RGB", (shot.width, shot.height), bytes(shot.raw), "raw", "BGRX"
-        )
+        img = _Image.frombytes("RGB", (w, h), raw, "raw", "BGRX")
 
         import region_selector
         selector = region_selector.RegionSelector(parent=None)
