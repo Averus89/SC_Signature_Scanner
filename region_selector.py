@@ -15,6 +15,7 @@ import paths
 
 
 CONFIG_FILE = paths.get_user_data_path() / "scan_region.json"
+WINDOW_CONFIG_FILE = paths.get_user_data_path() / "scan_region_window.json"
 
 
 def load_region() -> Optional[Tuple[int, int, int, int]]:
@@ -61,6 +62,48 @@ def clear_region():
 def is_configured() -> bool:
     """Check if a scan region has been configured."""
     return CONFIG_FILE.exists()
+
+
+def load_window_region() -> Optional[Tuple[int, int, int, int]]:
+    """Load the window-relative scan region.
+
+    Returns:
+        (x1, y1, x2, y2) in coordinates relative to the SC client area's
+        top-left, or None if not configured / file unreadable.
+    """
+    if WINDOW_CONFIG_FILE.exists():
+        try:
+            with open(WINDOW_CONFIG_FILE, 'r') as f:
+                data = json.load(f)
+                return (data['x1'], data['y1'], data['x2'], data['y2'])
+        except (json.JSONDecodeError, KeyError, IOError):
+            pass
+    return None
+
+
+def save_window_region(x1: int, y1: int, x2: int, y2: int) -> None:
+    """Persist a window-relative scan region."""
+    data = {
+        'x1': x1,
+        'y1': y1,
+        'x2': x2,
+        'y2': y2,
+        'width': x2 - x1,
+        'height': y2 - y1,
+    }
+    with open(WINDOW_CONFIG_FILE, 'w') as f:
+        json.dump(data, f, indent=2)
+
+
+def clear_window_region() -> None:
+    """Delete the window-relative scan region file."""
+    if WINDOW_CONFIG_FILE.exists():
+        WINDOW_CONFIG_FILE.unlink()
+
+
+def is_window_region_configured() -> bool:
+    """True if a window-relative scan region has been saved."""
+    return WINDOW_CONFIG_FILE.exists()
 
 
 class RegionSelector:
