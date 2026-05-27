@@ -35,6 +35,7 @@ function App() {
   const [liveRegionConfigured, setLiveRegionConfigured] = useState(false);
   const [settings, setSettings] = useState({
     popupX: 1920, popupY: 1080, duration: 10, scale: 100, debug: false, debugFolder: '',
+    liveProbeHz: 30, liveLogNoSignature: false,
   });
   const settingsSaveTimer = useRef(null);
   const [bridgeReady, setBridgeReady] = useState(

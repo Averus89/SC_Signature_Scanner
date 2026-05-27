@@ -76,6 +76,32 @@ function SettingsPanel({
         </div>
       </Panel>
 
+      <Panel title="LIVE CAPTURE" code="LIV-07b">
+        <div className="settings-instructions">
+          Knobs apply on next ENGAGE — toggling LIVE mode mid-session picks up new values.
+        </div>
+        <div className="settings-stack">
+          <label className="lbl">PROBE RATE
+            <input
+              type="range"
+              min="5"
+              max="60"
+              value={settings.liveProbeHz ?? 30}
+              onChange={e => upd('liveProbeHz', +e.target.value)}
+            />
+            <span className="val">{settings.liveProbeHz ?? 30} Hz</span>
+          </label>
+          <label className="lbl row">
+            <input
+              type="checkbox"
+              checked={!!settings.liveLogNoSignature}
+              onChange={e => upd('liveLogNoSignature', e.target.checked)}
+            />
+            <span>LOG UNMATCHED FRAMES (diagnostic)</span>
+          </label>
+        </div>
+      </Panel>
+
       <Panel title="DEBUG OUTPUT" code="DBG-08">
         <div className="settings-stack">
           <label className="lbl row">

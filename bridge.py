@@ -207,6 +207,10 @@ class Bridge:
         "popup_scale": 1.0,
         "debug_mode": False,
         "debug_folder": "",
+        # Live capture knobs — applied at LiveCapture construction in _start_live.
+        # Changes to these take effect on the next ENGAGE, not mid-session.
+        "live_probe_hz": 30,
+        "live_log_no_signature": False,
     }
 
     def get_settings(self) -> dict[str, Any]:
@@ -233,6 +237,12 @@ class Bridge:
             "debug": bool(cfg.get("debug_mode", self._SETTINGS_DEFAULTS["debug_mode"])),
             "debugFolder": str(
                 cfg.get("debug_folder", self._SETTINGS_DEFAULTS["debug_folder"])
+            ),
+            "liveProbeHz": int(
+                cfg.get("live_probe_hz", self._SETTINGS_DEFAULTS["live_probe_hz"])
+            ),
+            "liveLogNoSignature": bool(
+                cfg.get("live_log_no_signature", self._SETTINGS_DEFAULTS["live_log_no_signature"])
             ),
         }
 
@@ -268,6 +278,10 @@ class Bridge:
             cfg["debug_mode"] = bool(settings["debug"])
         if "debugFolder" in settings:
             cfg["debug_folder"] = str(settings["debugFolder"])
+        if "liveProbeHz" in settings:
+            cfg["live_probe_hz"] = max(5, min(60, int(settings["liveProbeHz"])))
+        if "liveLogNoSignature" in settings:
+            cfg["live_log_no_signature"] = bool(settings["liveLogNoSignature"])
 
         ok = self.config.save(cfg)
 
@@ -367,9 +381,16 @@ class Bridge:
     def _start_live(self) -> dict[str, Any]:
         if self.scanner is None:
             return {"ok": False, "error": "Scanner not initialized"}
+        cfg = self.config.load() or {}
+        probe_hz = max(5, min(60, int(cfg.get(
+            "live_probe_hz", self._SETTINGS_DEFAULTS["live_probe_hz"]))))
+        emit_empty = bool(cfg.get(
+            "live_log_no_signature", self._SETTINGS_DEFAULTS["live_log_no_signature"]))
         self.live_capture = LiveCapture(
             scanner=self.scanner,
             emit=self._on_live_result,
+            probe_hz=probe_hz,
+            emit_empty=emit_empty,
         )
         return self.live_capture.start()
 
