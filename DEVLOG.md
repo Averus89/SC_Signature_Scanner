@@ -49,6 +49,48 @@ The devlog shall always contain a clear "Current Status" or "Next Steps" section
 
 ## Changelog
 
+### 2026-05-27 — v6.1.0: Live window capture
+
+Branch `feat/live-window-capture`. Replaces the print-screen-to-folder workflow with optional live capture of the calibrated signature region directly from the running `starcitizen.exe` window at ~30 Hz. Folder-watch mode is preserved behind a Scanner-module toggle (FOLDER / LIVE); both feed the same downstream `bridge._scan_and_push` pipeline.
+
+**1. Capture pipeline.** New `live_capture.py` module: probes the SC window at the configured rate, computes a `blake2b` byte-hash of the captured ROI, runs OCR only when the hash is stable for `N` frames AND differs from the last emitted hash. Empty OCR results re-arm the tracker so the same content can fire again after the user looks away and back. Window-move detection invalidates hash state so capture follows the window across the desktop.
+
+**2. Window location.** New `window_finder.py` locates `starcitizen.exe` via `win32gui.EnumWindows` + `psutil` PID lookup. Title-substring match (`"star citizen"`, case-insensitive) covers the elevated-process case where `psutil` returns no name. Yields a frozen `WindowInfo` dataclass with the client-area rect in screen coords.
+
+**3. Window-relative region storage.** New `scan_region_window.json` in the user-data path. `region_selector.py` gained `load_window_region` / `save_window_region` / `clear_window_region` / `is_window_region_configured` next to the existing screen-pixel I/O. The existing `RegionSelector.open` accepts new kwargs `image=<PIL.Image>` (skip file load) and `save_as_window_relative=True` (persist via the new I/O), driving the "PICK FROM LIVE FRAME" calibration flow.
+
+**4. Scanner refactor.** `scan_image(path)` now delegates to a new `scan_pil_image(img, *, region=None)` entry point so live mode can pass an in-memory image with an explicit region tuple without disk round-trips.
+
+**5. Bridge wiring.** Added `get_scan_mode`, `set_scan_mode`, `calibrate_region_live`, `find_sc_window_status`, `is_live_region_configured` JS-exposed methods. Replaced `start_monitoring` / `stop_monitoring` with mode-dispatched `start_engagement` / `stop_engagement` (the old names remain as aliases). New `_on_live_result` callback parallels `_on_screenshot`, using a synthetic `live:HHMMSS` label so detection-log entries are traceable to the live source.
+
+**6. UI.** Scanner module gains a FOLDER/LIVE segmented toggle plus a status pill ("LIVE · 30 Hz" / "WAITING FOR SC" / "IDLE (MINIMIZED)" / "ERROR"). The screenshot-folder input is hidden in live mode and replaced by a "STAR CITIZEN" / "LIVE REGION" status pair. REGION module gains a "PICK FROM LIVE FRAME" button between PICK REGION and CLEAR.
+
+**Files added:**
+- `window_finder.py` — SC window enumeration
+- `live_capture.py` — StabilityTracker, geometry helper, LiveCapture thread
+- `tests/test_window_finder.py`, `tests/test_scanner_pil.py`, `tests/test_region_selector_storage.py`, `tests/test_live_capture_stability.py`, `tests/test_live_capture_geometry.py`, `tests/test_live_capture_loop.py` — 25 new pytest cases (33 total with smoke)
+- `docs/manual-test-live-capture.md` — release-time checklist
+- `pytest.ini`, `requirements-dev.txt`, `tests/__init__.py`, `tests/conftest.py`, `tests/test_smoke.py` — pytest bootstrap
+
+**Files modified:**
+- `scanner.py` — `scan_image` split into thin loader + `scan_pil_image`; `_scan_with_fixed_region` deleted (logic folded into new entry)
+- `region_selector.py` — window-relative I/O; `open` accepts in-memory image + save-as-window-relative flag
+- `bridge.py` — new JS-exposed methods; mode-dispatched engagement; live result callback
+- `ui/main/app.jsx`, `ui/main/scanner-panel.jsx`, `ui/main/module-panels.jsx` — mode toggle, status pill, live calibration button
+- `requirements.txt` — `mss>=9.0.0`, `pywin32>=306`, `psutil>=5.9.0`
+- `SC_Signature_Scanner.spec` — hidden imports + `collect_submodules` for the new deps
+
+**Constraints (unchanged):**
+- SC must run in Windowed / Borderless Windowed mode — exclusive fullscreen blocks both desktop capture and the always-on-top overlay.
+
+**Design decision: OpenCV-based similarity rejected.** Considered using `cv2.absdiff` or `img_hash` for change detection (OpenCV is already a project dep). Rejected: the problem is temporal (transient pixel diffs from anti-aliasing, cursor crossings, compositor jitter), not spatial. A temporal filter (N-frame stability counter) absorbs them without introducing a similarity threshold that would need tuning and could mask real one-digit signature changes. See `docs/superpowers/specs/2026-05-27-live-window-capture-design.md` → "Change-detection algorithms".
+
+**Test suite:** 33 pytest cases covering window enumeration, scanner refactor, region storage, stability tracker, geometry math, and the full LiveCapture loop with mocked window/mss/scanner. Manual verification per `docs/manual-test-live-capture.md`.
+
+**Version:** `6.0.0` → `6.1.0`.
+
+---
+
 ### 2026-04-30 — v5.1.0.dev7: Windows OCR primary, EasyOCR fallback + UI polish
 
 Branch `feat/webview-migration`. Two streams of work landed together:
