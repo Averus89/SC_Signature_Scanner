@@ -81,3 +81,39 @@ class StabilityTracker:
         self._last_seen = None
         self._seen_count = 0
         self._last_emitted = None
+
+
+MIN_ROI_W = 10
+MIN_ROI_H = 5
+
+
+def compute_abs_capture_rect(
+    client_rect: tuple[int, int, int, int],
+    region_window_rel: tuple[int, int, int, int],
+) -> Optional[tuple[int, int, int, int]]:
+    """Translate a window-relative ROI into an absolute screen rect for mss.grab.
+
+    Args:
+        client_rect: (x, y, w, h) of the SC client area in screen coords.
+        region_window_rel: (x1, y1, x2, y2) of the ROI in coordinates relative
+            to the client area's top-left.
+
+    Returns:
+        (left, top, width, height) for mss.grab(), or None if the ROI clamps
+        to a degenerate area (smaller than MIN_ROI_W × MIN_ROI_H).
+    """
+    cx, cy, cw, ch = client_rect
+    x1, y1, x2, y2 = region_window_rel
+
+    # Clamp inside (0..cw, 0..ch) — window-relative.
+    x1 = max(0, min(x1, cw))
+    y1 = max(0, min(y1, ch))
+    x2 = max(0, min(x2, cw))
+    y2 = max(0, min(y2, ch))
+
+    w = x2 - x1
+    h = y2 - y1
+    if w < MIN_ROI_W or h < MIN_ROI_H:
+        return None
+
+    return (cx + x1, cy + y1, w, h)
