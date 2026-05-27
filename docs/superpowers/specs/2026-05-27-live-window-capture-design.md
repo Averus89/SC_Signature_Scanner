@@ -252,6 +252,17 @@ The spec does **not** silently work around this. If real-world testing shows it 
 2. Raise `stable_frames` to 4 or 5 (small constant, easy tweak).
 3. Replace `blake2b` strict equality with a perceptual / fuzzy hash (e.g. `dhash` or downsample-then-`blake2b`) and compare with a Hamming-distance threshold — but only if 1 and 2 don't resolve it. Fuzzy hashing trades determinism for robustness, and the bug it solves is one we have no evidence of yet (YAGNI).
 
+#### Considered and rejected: OpenCV-based similarity
+
+OpenCV is already a project dependency (`scanner.py` uses `cv2.connectedComponentsWithStats`, etc.) and is bundled in the PyInstaller spec, so reaching for `cv2.absdiff` + thresholded pixel-difference count, `cv2.matchTemplate`, or `opencv-contrib-python`'s `img_hash` module would cost zero additional install weight. We chose **not** to use any of them for the steady-state change detector. Reasons:
+
+- **The problem is temporal, not spatial.** The "slight differences" between two captures of the same HUD content are transient: a mouse cursor crossing the ROI, compositor jitter, a single-frame animation tick. Once they pass, the framebuffer goes byte-identical again. A temporal filter (the N-frame stability counter) absorbs them at lower cost than any per-pixel similarity score, because in steady state the hash matches and the counter just increments — no spatial comparison runs at all.
+- **It adds a tunable threshold.** A similarity score needs a cutoff ("at least 98% similar = same"). That cutoff has to be picked, re-tuned per game patch / monitor / GPU, and documented. Byte-hash + stability counter has no such knob; either two frames are identical or they aren't.
+- **It costs more CPU every tick, not just on emit.** `cv2.absdiff` followed by `cv2.countNonZero` on a 120×30×4 buffer runs slower than `blake2b` over the same 14 KB and has to run on every probe (we have no per-frame shortcut). The byte hash, by contrast, is near-free and the steady-state loop stays close to idle.
+- **A loose threshold can hide real changes.** Adjacent signature values often differ in only one digit — "3540" → "3585" is a handful of pixels on a tight crop. Any threshold permissive enough to ignore anti-aliasing also risks ignoring that. With strict equality + the stability gate, a real digit change always triggers; only persistent animation can confuse it (covered by the escape valves above).
+
+The right time to revisit this decision is if a user reports a region that genuinely never stabilizes (escape valve #3 above), at which point fuzzy hashing — not OpenCV similarity — is the targeted fix.
+
 ### Calibration flow
 
 ```
