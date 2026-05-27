@@ -7,8 +7,12 @@ Three units, each in this file:
 """
 from __future__ import annotations
 
-from typing import Literal
-from typing import Optional
+import hashlib
+import threading
+import time
+from typing import Any, Callable, Literal, Optional
+
+from PIL import Image
 
 
 Decision = Literal["no_change", "ongoing", "stable_change"]
@@ -117,3 +121,195 @@ def compute_abs_capture_rect(
         return None
 
     return (cx + x1, cy + y1, w, h)
+
+
+Status = Literal["stopped", "waiting", "idle_minimized", "running", "error"]
+
+
+# These imports stay lazy so the unit tests don't need win32 / mss installed
+# to exercise the pure logic.
+def _default_mss_factory():
+    import mss
+    return mss.mss()
+
+
+def _default_find_sc_window():
+    from window_finder import find_sc_window
+    return find_sc_window()
+
+
+def _default_load_window_region():
+    import region_selector
+    return region_selector.load_window_region()
+
+
+class LiveCapture:
+    """Background capture loop. Probes the SC window at probe_hz and emits
+    scan results via the supplied `emit` callback when content changes and
+    stabilizes."""
+
+    def __init__(
+        self,
+        *,
+        scanner: Any,
+        emit: Callable[..., None],
+        find_sc_window: Callable[[], Any] = _default_find_sc_window,
+        load_window_region: Callable[[], Any] = _default_load_window_region,
+        mss_factory: Callable[[], Any] = _default_mss_factory,
+        probe_hz: int = 30,
+        stable_frames: int = 3,
+    ) -> None:
+        self.scanner = scanner
+        self.emit = emit
+        self._find_sc_window = find_sc_window
+        self._load_window_region = load_window_region
+        self._mss_factory = mss_factory
+
+        self._tick_period = 1.0 / probe_hz
+        self._idle_period = 0.5  # waiting / idle_minimized
+        self._tracker = StabilityTracker(stable_frames=stable_frames)
+        self._status: Status = "stopped"
+        self._consecutive_grab_failures = 0
+
+        self._region_window_rel: Optional[tuple[int, int, int, int]] = None
+        self._prev_client_rect: Optional[tuple[int, int, int, int]] = None
+        self._abs_capture_rect: Optional[tuple[int, int, int, int]] = None
+
+        self._mss: Any = None
+        self._thread: Optional[threading.Thread] = None
+        self._stop_event = threading.Event()
+
+    @property
+    def status(self) -> Status:
+        return self._status
+
+    def start(self) -> dict:
+        """Start the background capture thread."""
+        if self._thread and self._thread.is_alive():
+            return {"ok": True, "alreadyRunning": True}
+        result = self._prepare_start()
+        if not result["ok"]:
+            return result
+        self._stop_event.clear()
+        self._thread = threading.Thread(target=self._run, daemon=True, name="LiveCapture")
+        self._thread.start()
+        return {"ok": True}
+
+    def start_for_tests(self) -> dict:
+        """Initialize state without launching the thread — for unit tests."""
+        result = self._prepare_start()
+        if result["ok"]:
+            # Pre-create the mss context so tick() reuses a single instance,
+            # allowing FakeMss to dispense shots in sequence.
+            self._mss = self._mss_factory()
+        return result
+
+    def _prepare_start(self) -> dict:
+        region = self._load_window_region()
+        if region is None:
+            self._status = "error"
+            return {
+                "ok": False,
+                "error": "Live region not calibrated — use REGION → Calibrate from live frame.",
+            }
+        self._region_window_rel = region
+        self._tracker.reset()
+        self._prev_client_rect = None
+        self._abs_capture_rect = None
+        self._consecutive_grab_failures = 0
+        self._status = "waiting"
+        return {"ok": True}
+
+    def stop(self) -> None:
+        self._stop_event.set()
+        if self._thread:
+            self._thread.join(timeout=2.0)
+        self._thread = None
+        self._mss = None
+        self._status = "stopped"
+
+    # ---- Loop -----------------------------------------------------------------
+
+    def _run(self) -> None:
+        self._mss = self._mss_factory()
+        try:
+            while not self._stop_event.is_set():
+                start = time.monotonic()
+                next_period = self.tick()
+                elapsed = time.monotonic() - start
+                remaining = max(0.0, next_period - elapsed)
+                self._stop_event.wait(remaining)
+        finally:
+            self._mss = None
+
+    def tick(self) -> float:
+        """Run one probe iteration. Returns the desired sleep before next tick."""
+        if self._region_window_rel is None:
+            self._status = "error"
+            return self._idle_period
+
+        try:
+            info = self._find_sc_window()
+        except Exception:
+            info = None
+
+        if info is None:
+            self._tracker.reset()
+            self._prev_client_rect = None
+            self._abs_capture_rect = None
+            self._status = "waiting"
+            return self._idle_period
+
+        if info.is_minimized:
+            self._status = "idle_minimized"
+            return self._idle_period
+
+        if info.client_rect != self._prev_client_rect:
+            self._abs_capture_rect = compute_abs_capture_rect(
+                info.client_rect, self._region_window_rel
+            )
+            self._prev_client_rect = info.client_rect
+            self._tracker.reset()
+
+        if self._abs_capture_rect is None:
+            self._status = "error"
+            return self._idle_period
+
+        try:
+            shot = (self._mss or self._mss_factory()).grab({
+                "left": self._abs_capture_rect[0],
+                "top": self._abs_capture_rect[1],
+                "width": self._abs_capture_rect[2],
+                "height": self._abs_capture_rect[3],
+            })
+        except Exception:
+            self._consecutive_grab_failures += 1
+            if self._consecutive_grab_failures >= 3:
+                self._status = "error"
+            return self._tick_period
+        self._consecutive_grab_failures = 0
+
+        raw = bytes(shot.raw)
+        digest = hashlib.blake2b(raw, digest_size=8).digest()
+        decision = self._tracker.observe(digest)
+        self._status = "running"
+
+        if decision != "stable_change":
+            return self._tick_period
+
+        img = Image.frombytes("RGB", (shot.width, shot.height), raw, "raw", "BGRX")
+        try:
+            result = self.scanner.scan_pil_image(
+                img, region=(0, 0, shot.width, shot.height)
+            )
+        except Exception as e:
+            self.emit({"error": f"Live scan failed: {e}"}, source="live")
+            return self._tick_period
+
+        if result is None or result.get("error") or not result.get("matches"):
+            # Blank / no-lock — re-arm so the same content can fire later.
+            self._tracker.empty_rearm()
+            return self._tick_period
+
+        self.emit(result, source="live")
+        return self._tick_period
