@@ -49,6 +49,25 @@ The devlog shall always contain a clear "Current Status" or "Next Steps" section
 
 ## Changelog
 
+### 2026-10-14 — v6.2.8: Pin crop no longer eats digits; single-read popups again
+
+Branch `feat/timed-ocr`. v6.2.7 tested worse in game (13:00–13:09 session, 73 OCR runs, 3 rocks: 25,440 / 16,960 / 11,565).
+
+**What went wrong.**
+- The pin crop took the *rightmost* orange-heavy column. Thin "1"s with overlapping chromatic fringes also cross the threshold, so "11,565" was cropped to "565" (27 runs, read "565"/"585" at 0.83–1.00 confidence → no signature). 25,440 lost its first digit in places ("58", "344").
+- 2-read confirmation was too strict: most rocks are never read correctly twice in a row before the player moves on.
+- 16,960 is read as 16980/18980 (6↔8 at small digit height); the look-alike correction rightly refuses 16980 as ambiguous (16,780 / 16,900 / 16,960). Only 6 of 32 intact 16,960 crops read correctly with or without contrast normalization, so this is an OCR limit, not a v6.2.7 regression; confirmation just turned "rarely" into "never".
+
+**Fix.**
+- `strip_marker_icon` crops at the end of the FIRST run of orange-heavy columns that is ≥ 5% of the crop width (the pin), never further right.
+- `live_confirm_reads` default 2 → 1. Confidence floor 0.45 and the 3-empty-read re-arm stay.
+
+**Replay (popups / wrong / rocks covered).** Session A (12:45–12:56, 11 rock values): 6.2.6 34 / 14 / 11; 6.2.7 8–10 / 1–3 / 6; 6.2.8 18 / 2 / 11. Session B (images already v1-cropped, so the digit-eating fix can't be replayed): 6.2.6 8 / 3 / 3; 6.2.7 2 / 1 / 1; 6.2.8 rules 5 / 1 / 3. Contrast normalization re-checked: with pin crop 43 vs 34 correct of 49 without it — kept.
+
+**Open.** 16,960-style 6↔8 misreads need a better recognizer (e.g. a small digit model trained on the HUD font) — added to TODO.
+
+---
+
 ### 2026-10-14 — v6.2.7: Stop wrong and flipping live popups
 
 Branch `feat/timed-ocr`. After v6.2.6 live detection fired, but some popups did not match the screen and the popup flipped 2000 → 3200 → 2000.

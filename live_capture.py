@@ -30,10 +30,12 @@ _NO_FRAME_ERROR_THRESHOLD = 90
 # empty space. ~40 ms of OCR every 0.4 s is ~10% of one core.
 DEFAULT_OCR_INTERVAL_S = 0.4
 
-# A single read never reaches the popup: the same signature must be read this
-# many times in a row. Single misreads (pin icon merged into the number, rock
-# texture over the digits) otherwise flipped the popup 2000 -> 3200 -> 2000.
-DEFAULT_CONFIRM_READS = 2
+# Identical reads in a row needed before a popup. 2 stopped single misreads
+# from flipping the popup, but most rocks are never read correctly twice in a
+# row before the player moves on: in two replayed sessions it covered 6 of 11
+# and 1 of 3 rocks, versus all of them at 1. With the pin crop and confidence
+# floor doing the filtering, 1 is the better trade (configurable).
+DEFAULT_CONFIRM_READS = 1
 # Reads below this mean OCR confidence are ignored. In a labelled session every
 # wrong read that survived icon stripping scored <= 0.39 while true reads were
 # mostly 0.55-0.99; 0.45 dropped all wrong reads and one true read (0.35).
@@ -41,9 +43,12 @@ DEFAULT_MIN_CONFIDENCE = 0.45
 
 # The signature label is drawn right of an orange map-pin icon, which OCR reads
 # as a leading "2" or "9" ("9.2000" -> 3200, "94000"). The pin is a solid
-# orange block; digits only carry thin orange fringes, so columns that are
-# mostly orange mark the pin.
+# orange block; digits only carry thin orange fringes, so a wide run of mostly
+# orange columns marks the pin. Only the FIRST such run from the left counts:
+# taking the rightmost orange column instead cut into narrow digits whose
+# fringes overlap ("11,565" -> "565").
 _ICON_COLUMN_FRACTION = 0.25  # share of a column's pixels that must be orange
+_ICON_MIN_RUN_FRACTION = 0.05  # a pin run is at least this share of the width
 _ICON_SEARCH_FRACTION = 0.6   # the pin is only looked for in the left part
 _ICON_MARGIN_FRACTION = 0.03  # extra crop right of the pin's last column
 
@@ -59,12 +64,20 @@ def strip_marker_icon(img: Image.Image) -> Image.Image:
     r, g, b = rgb[..., 0], rgb[..., 1], rgb[..., 2]
     orange = (r - b > 80) & (r > 150) & (g < 170)
     icon_cols = orange.sum(axis=0) >= _ICON_COLUMN_FRACTION * rgb.shape[0]
-    search = int(rgb.shape[1] * _ICON_SEARCH_FRACTION)
-    found = np.flatnonzero(icon_cols[:search])
-    if found.size == 0:
-        return img
-    left = int(found.max()) + 1 + int(_ICON_MARGIN_FRACTION * rgb.shape[1])
-    return img.crop((left, 0, img.width, img.height))
+    width = rgb.shape[1]
+    min_run = _ICON_MIN_RUN_FRACTION * width
+    x = 0
+    while x < int(width * _ICON_SEARCH_FRACTION):
+        if not icon_cols[x]:
+            x += 1
+            continue
+        start = x
+        while x < width and icon_cols[x]:
+            x += 1
+        if x - start >= min_run:
+            left = x + int(_ICON_MARGIN_FRACTION * width)
+            return img.crop((left, 0, img.width, img.height))
+    return img
 
 
 class SignatureConfirmer:

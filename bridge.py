@@ -266,7 +266,7 @@ class Bridge:
         # Config-file only (no UI control): seconds between live OCR runs,
         # identical reads needed before a popup, and minimum OCR confidence.
         "live_ocr_interval_s": 0.4,
-        "live_confirm_reads": 2,
+        "live_confirm_reads": 1,
         "live_min_confidence": 0.45,
     }
 

@@ -59,6 +59,16 @@ def test_marker_icon_is_cropped_off():
     assert out.height == 40
 
 
+def test_orange_heavy_narrow_digits_after_the_pin_are_kept():
+    """Thin '1's whose fringes overlap can look orange-heavy; only the pin
+    (first wide run) may be cropped, never digits further right."""
+    img = _label(with_icon=True)
+    a = np.asarray(img).copy()
+    a[5:35, 52:54] = (240, 120, 40)  # a 2-px orange-heavy sliver inside the digits
+    out = strip_marker_icon(Image.fromarray(a))
+    assert 22 <= 100 - out.width <= 30
+
+
 def test_crop_without_icon_is_unchanged():
     img = _label(with_icon=False)
     assert strip_marker_icon(img) is img
