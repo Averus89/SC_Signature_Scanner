@@ -55,6 +55,7 @@ def _make_live(
     region: Optional[tuple[int, int, int, int]] = (0, 0, 100, 30),
     scan_result: Optional[dict] = None,
     emit_empty: bool = False,
+    confirm_reads: int = 1,
 ) -> tuple[LiveCapture, MagicMock, dict, FakeClock]:
     """Build a LiveCapture wired with a FakeWGCSession factory and fake clock.
 
@@ -84,6 +85,7 @@ def _make_live(
         wgc_session_factory=factory,
         probe_hz=30,
         ocr_interval_s=INTERVAL,
+        confirm_reads=confirm_reads,
         emit_empty=emit_empty,
         clock=clock,
     )
@@ -177,10 +179,42 @@ def test_empty_read_re_arms_so_the_same_signature_fires_again():
     live.tick()
     _frame_tick(live, sessions, clock, 1)  # emit #1
     live.scanner.scan_pil_image.return_value = None
-    _frame_tick(live, sessions, clock, 2)  # empty read → re-arm
+    for i in range(3):
+        _frame_tick(live, sessions, clock, 2 + i)  # looked away → re-arm
     live.scanner.scan_pil_image.return_value = HIT
     _frame_tick(live, sessions, clock, 1)  # emit #2
     assert emit.call_count == 2
+
+
+def test_single_read_does_not_emit_when_confirmation_is_required():
+    live, emit, sessions, clock = _make_live(window=WIN, scan_result=HIT, confirm_reads=2)
+    live.start_for_tests()
+    live.tick()
+    _frame_tick(live, sessions, clock, 1)
+    emit.assert_not_called()
+    _frame_tick(live, sessions, clock, 2)
+    emit.assert_called_once()
+
+
+def test_low_confidence_read_is_ignored():
+    low = dict(HIT, ocr_confidence=0.3)
+    live, emit, sessions, clock = _make_live(window=WIN, scan_result=low)
+    live.start_for_tests()
+    live.tick()
+    _frame_tick(live, sessions, clock, 1)
+    emit.assert_not_called()
+
+
+def test_low_confidence_read_between_confirming_reads_does_not_reset():
+    live, emit, sessions, clock = _make_live(window=WIN, scan_result=HIT, confirm_reads=2)
+    live.start_for_tests()
+    live.tick()
+    _frame_tick(live, sessions, clock, 1)  # HIT #1
+    live.scanner.scan_pil_image.return_value = {"signature": 999, "matches": [{"name": "z"}], "ocr_confidence": 0.2}
+    _frame_tick(live, sessions, clock, 2)  # ignored
+    live.scanner.scan_pil_image.return_value = HIT
+    _frame_tick(live, sessions, clock, 3)  # HIT #2 → confirmed
+    assert [c.args[0]["signature"] for c in emit.call_args_list] == [3540]
 
 
 def test_window_change_starts_a_fresh_session_and_re_arms():

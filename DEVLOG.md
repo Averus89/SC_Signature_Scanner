@@ -49,6 +49,22 @@ The devlog shall always contain a clear "Current Status" or "Next Steps" section
 
 ## Changelog
 
+### 2026-10-14 — v6.2.7: Stop wrong and flipping live popups
+
+Branch `feat/timed-ocr`. After v6.2.6 live detection fired, but some popups did not match the screen and the popup flipped 2000 → 3200 → 2000.
+
+**Root cause (from 180 OCR runs of a real session, 12:45–12:56, 49 with a signature).** The 85×40 ROI also contains the orange map-pin icon drawn left of the number. OCR reads the pin as a leading "2" or "9": `9.2000` → "9.200" → look-alike correction → 3200; `9.4000` → 94000; `2.10000` → 2400; 10,000 → `21000`. Labelled against what the crops show: 25 of 40 reads correct, 15 wrong; 34 popups, 14 wrong. The true 2,000 popups were correct — that rock really showed 2,000. No crop without a label produced a signature in this session; the "asteroid read as a number" cases were labels over bright rock misread at low confidence (17,200 → 7200 / 44200 at 0.30–0.39).
+
+**Fix (live mode only).**
+- `strip_marker_icon`: crop away the pin before OCR. The pin is a solid orange block (42–45% of a column's pixels orange); digits only carry thin chromatic fringes (≤ 21%). Columns ≥ 25% orange in the left 60% of the crop mark the pin. Masking orange pixels instead was tried and destroyed the digits (1/40 correct). Crop alone: 34/40 correct, 4 wrong, 2 none.
+- Minimum OCR confidence 0.45 (`live_min_confidence`): the 4 remaining wrong reads all scored ≤ 0.39; true reads mostly 0.55–0.99. Costs 1 true read (0.35) in this set. Low-confidence reads are ignored rather than treated as empty.
+- `SignatureConfirmer` (`live_confirm_reads`, default 2): a value reaches the popup only after 2 identical reads in a row, so one misread can never flip it. Re-arming the same value needs 3 empty reads in a row (~1.2 s of looking away), so a flickering empty read doesn't repeat the popup.
+- Replay of the session: old rules 34 popups / 14 wrong; new rules 8 popups / 0 wrong (one per rock visit). Trade-off: labels read correctly only once between empty reads (21,500, 17,200, 11,565, 14,000 in this session) no longer pop up.
+
+**Tests.** New `tests/test_live_capture_confirm.py` (A,B,A never emits; A,A emits; A,A,B,B switches; flicker vs look-away re-arm; pin crop on/off). Loop tests for the confidence floor and confirmation. 74 pass.
+
+---
+
 ### 2026-10-14 — v6.2.6: Timed live OCR + contrast normalization
 
 Branch `feat/timed-ocr` (on top of `feat/wgc-ocr-combined`). Fixes "no detection" in live mode.

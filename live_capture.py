@@ -30,6 +30,96 @@ _NO_FRAME_ERROR_THRESHOLD = 90
 # empty space. ~40 ms of OCR every 0.4 s is ~10% of one core.
 DEFAULT_OCR_INTERVAL_S = 0.4
 
+# A single read never reaches the popup: the same signature must be read this
+# many times in a row. Single misreads (pin icon merged into the number, rock
+# texture over the digits) otherwise flipped the popup 2000 -> 3200 -> 2000.
+DEFAULT_CONFIRM_READS = 2
+# Reads below this mean OCR confidence are ignored. In a labelled session every
+# wrong read that survived icon stripping scored <= 0.39 while true reads were
+# mostly 0.55-0.99; 0.45 dropped all wrong reads and one true read (0.35).
+DEFAULT_MIN_CONFIDENCE = 0.45
+
+# The signature label is drawn right of an orange map-pin icon, which OCR reads
+# as a leading "2" or "9" ("9.2000" -> 3200, "94000"). The pin is a solid
+# orange block; digits only carry thin orange fringes, so columns that are
+# mostly orange mark the pin.
+_ICON_COLUMN_FRACTION = 0.25  # share of a column's pixels that must be orange
+_ICON_SEARCH_FRACTION = 0.6   # the pin is only looked for in the left part
+_ICON_MARGIN_FRACTION = 0.03  # extra crop right of the pin's last column
+
+
+def strip_marker_icon(img: Image.Image) -> Image.Image:
+    """Crop away the orange map-pin icon left of the signature digits.
+
+    Returns the image unchanged when no pin is found.
+    """
+    import numpy as np
+
+    rgb = np.asarray(img.convert("RGB")).astype(np.int16)
+    r, g, b = rgb[..., 0], rgb[..., 1], rgb[..., 2]
+    orange = (r - b > 80) & (r > 150) & (g < 170)
+    icon_cols = orange.sum(axis=0) >= _ICON_COLUMN_FRACTION * rgb.shape[0]
+    search = int(rgb.shape[1] * _ICON_SEARCH_FRACTION)
+    found = np.flatnonzero(icon_cols[:search])
+    if found.size == 0:
+        return img
+    left = int(found.max()) + 1 + int(_ICON_MARGIN_FRACTION * rgb.shape[1])
+    return img.crop((left, 0, img.width, img.height))
+
+
+class SignatureConfirmer:
+    """Decide which OCR reads reach the popup.
+
+    - A signature is emitted once it has been read `confirm_reads` times in a
+      row and differs from the last emitted one.
+    - An empty read (nothing on screen) breaks the run. After
+      `rearm_empty_reads` empty reads in a row the last emitted value is
+      forgotten, so looking away and back at the same rock fires again; a
+      single flickering empty read does not repeat the popup.
+    - A low-confidence read is ignored (the caller never passes it in).
+    """
+
+    def __init__(
+        self,
+        confirm_reads: int = DEFAULT_CONFIRM_READS,
+        rearm_empty_reads: int = 3,
+    ) -> None:
+        if confirm_reads < 1:
+            raise ValueError("confirm_reads must be >= 1")
+        self._confirm_reads = confirm_reads
+        self._rearm_empty_reads = rearm_empty_reads
+        self._candidate: Optional[Any] = None
+        self._count = 0
+        self._empty_count = 0
+        self._last_emitted: Optional[Any] = None
+
+    def observe(self, signature: Optional[Any]) -> Optional[Any]:
+        """Feed one confident read (None = no signature). Returns the
+        signature to emit, or None."""
+        if signature is None:
+            self._candidate = None
+            self._count = 0
+            self._empty_count += 1
+            if self._empty_count >= self._rearm_empty_reads:
+                self._last_emitted = None
+            return None
+        self._empty_count = 0
+        if signature == self._candidate:
+            self._count += 1
+        else:
+            self._candidate = signature
+            self._count = 1
+        if self._count >= self._confirm_reads and signature != self._last_emitted:
+            self._last_emitted = signature
+            return signature
+        return None
+
+    def reset(self) -> None:
+        self._candidate = None
+        self._count = 0
+        self._empty_count = 0
+        self._last_emitted = None
+
 
 MIN_ROI_W = 10
 MIN_ROI_H = 5
@@ -208,7 +298,7 @@ def _default_wgc_session_factory(hwnd, on_frame):
 class LiveCapture:
     """Background capture loop. Probes the SC window at probe_hz, OCRs the
     ROI every `ocr_interval_s`, and emits scan results via the supplied
-    `emit` callback when the read signature changes."""
+    `emit` callback once a new signature is confirmed (see SignatureConfirmer)."""
 
     def __init__(
         self,
@@ -220,6 +310,8 @@ class LiveCapture:
         wgc_session_factory: Callable[[int, Callable[[bytes, int, int], None]], Any] = _default_wgc_session_factory,
         probe_hz: int = 30,
         ocr_interval_s: float = DEFAULT_OCR_INTERVAL_S,
+        confirm_reads: int = DEFAULT_CONFIRM_READS,
+        min_confidence: float = DEFAULT_MIN_CONFIDENCE,
         emit_empty: bool = False,
         clock: Callable[[], float] = time.monotonic,
     ) -> None:
@@ -235,9 +327,8 @@ class LiveCapture:
         self._idle_period = 0.5  # waiting / idle_minimized
         self._ocr_interval_s = ocr_interval_s
         self._last_ocr_at: Optional[float] = None
-        # Last signature emitted; cleared by an empty read so the same rock
-        # fires again after the player looks away and back.
-        self._last_emitted_signature: Optional[Any] = None
+        self._min_confidence = min_confidence
+        self._confirmer = SignatureConfirmer(confirm_reads)
         self._status: Status = "stopped"
 
         self._region_window_rel: Optional[tuple[int, int, int, int]] = None
@@ -292,7 +383,7 @@ class LiveCapture:
         used whenever the capture target changes."""
         self._frame_buffer.clear()
         self._last_ocr_at = None
-        self._last_emitted_signature = None
+        self._confirmer.reset()
 
     def stop(self) -> None:
         self._stop_event.set()
@@ -433,6 +524,7 @@ class LiveCapture:
             img = fuse_frames(same_content) or Image.frombytes(
                 "RGB", (roi_w, roi_h), roi_bytes, "raw", "BGRX"
             )
+            img = strip_marker_icon(img)
             result = self.scanner.scan_pil_image(
                 img, region=(0, 0, img.width, img.height)
             )
@@ -442,14 +534,14 @@ class LiveCapture:
             return self._tick_period
 
         if result is None or result.get("error") or not result.get("matches"):
-            self._last_emitted_signature = None
+            self._confirmer.observe(None)
             if self._emit_empty:
                 self.emit(result or {"error": "No signature detected"}, source="live")
             return self._tick_period
 
-        signature = result.get("signature")
-        if signature == self._last_emitted_signature:
+        if result.get("ocr_confidence", 1.0) < self._min_confidence:
             return self._tick_period
-        self._last_emitted_signature = signature
-        self.emit(result, source="live")
+
+        if self._confirmer.observe(result.get("signature")) is not None:
+            self.emit(result, source="live")
         return self._tick_period
