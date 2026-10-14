@@ -1,26 +1,66 @@
-# Builds the Windows release zip with build.py (PyInstaller + SC_Signature_Scanner.spec).
+# Builds the Windows release zip with build.py (PyInstaller + SC_Signature_Scanner.spec)
+# and publishes a GitHub Release when a merge to master carries a new version.
 # Author: Mallachi
 name: Build Windows exe
 
 on:
   workflow_dispatch:
   push:
-    tags:
-      - "v*"
+    branches:
+      - master
   # Catch packaging breakage early when the build inputs change.
   pull_request:
     paths:
       - ".github/workflows/build-windows.yml"
       - "SC_Signature_Scanner.spec"
       - "build.py"
+      - "release_notes.py"
       - "requirements.txt"
 
 permissions:
   contents: write
 
+# Two quick merges must not race to create the same release.
+concurrency:
+  group: build-windows-${{ github.ref }}
+  cancel-in-progress: false
+
 jobs:
+  check:
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+      release: ${{ steps.release.outputs.release }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Read app version
+        id: version
+        run: |
+          version=$(python3 -c "import version_checker; print(version_checker.CURRENT_VERSION)")
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "App version: $version"
+
+      # A release happens once per version: merges that don't bump
+      # CURRENT_VERSION find the tag already there and skip the build.
+      - name: Decide whether to release
+        id: release
+        run: |
+          if [ "$GITHUB_EVENT_NAME" != "push" ]; then
+            echo "release=false" >> "$GITHUB_OUTPUT"
+          elif git ls-remote --exit-code --tags origin "refs/tags/v${{ steps.version.outputs.version }}" > /dev/null; then
+            echo "Tag v${{ steps.version.outputs.version }} already exists; nothing to release."
+            echo "release=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "release=true" >> "$GITHUB_OUTPUT"
+          fi
+
   build:
+    needs: check
+    if: github.event_name != 'push' || needs.check.outputs.release == 'true'
     runs-on: windows-latest
+    env:
+      VERSION: ${{ needs.check.outputs.version }}
     steps:
       - uses: actions/checkout@v4
 
@@ -29,26 +69,6 @@ jobs:
           python-version: "3.13"
           cache: pip
           cache-dependency-path: requirements.txt
-
-      - name: Read app version
-        id: version
-        shell: pwsh
-        run: |
-          $version = python -c "import version_checker; print(version_checker.CURRENT_VERSION)"
-          "version=$version" >> $env:GITHUB_OUTPUT
-          Write-Host "App version: $version"
-
-      # A release tag must match CURRENT_VERSION, otherwise the in-app
-      # update checker would keep offering the same release.
-      - name: Check tag matches app version
-        if: startsWith(github.ref, 'refs/tags/')
-        shell: pwsh
-        run: |
-          $tag = "${{ github.ref_name }}".TrimStart("v")
-          if ($tag -ne "${{ steps.version.outputs.version }}") {
-            Write-Error "Tag v$tag does not match CURRENT_VERSION ${{ steps.version.outputs.version }}"
-            exit 1
-          }
 
       # CPU-only torch keeps the bundle far smaller than the default CUDA build.
       - name: Install dependencies
@@ -63,13 +83,26 @@ jobs:
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
-          name: SC_Signature_Scanner_v${{ steps.version.outputs.version }}
-          path: dist/SC_Signature_Scanner_v${{ steps.version.outputs.version }}.zip
+          name: SC_Signature_Scanner_v${{ env.VERSION }}
+          path: dist/SC_Signature_Scanner_v${{ env.VERSION }}.zip
           if-no-files-found: error
 
+      # bash redirects Python's UTF-8 bytes untouched; pwsh would re-encode them.
+      - name: Write release notes
+        shell: bash
+        run: |
+          python release_notes.py "$VERSION" > release_notes.md
+          cat release_notes.md
+
+      # Notes = this version's DEVLOG entry, followed by GitHub's list of
+      # PRs merged since the previous release.
       - name: Publish GitHub Release
-        if: startsWith(github.ref, 'refs/tags/')
+        if: needs.check.outputs.release == 'true'
         uses: softprops/action-gh-release@v2
         with:
-          files: dist/SC_Signature_Scanner_v${{ steps.version.outputs.version }}.zip
+          tag_name: v${{ env.VERSION }}
+          target_commitish: ${{ github.sha }}
+          name: v${{ env.VERSION }}
+          body_path: release_notes.md
           generate_release_notes: true
+          files: dist/SC_Signature_Scanner_v${{ env.VERSION }}.zip

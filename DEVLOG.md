@@ -49,13 +49,14 @@ The devlog shall always contain a clear "Current Status" or "Next Steps" section
 
 ## Changelog
 
-### 2026-10-14 — v6.2.11: Windows build in GitHub Actions
+### 2026-10-14 — v6.2.11: Automatic Windows releases
 
 - New `.github/workflows/build-windows.yml` runs `build.py` on `windows-latest` (Python 3.13, CPU-only torch) and uploads `SC_Signature_Scanner_v<version>.zip` as a workflow artifact.
-- Triggers: manual dispatch, `v*` tags, and PRs that touch the spec, `build.py`, `requirements.txt` or the workflow itself.
-- On a tag the job fails unless the tag equals `version_checker.CURRENT_VERSION`, then attaches the zip to a GitHub Release (the in-app update checker reads `releases/latest`).
+- Every merge to `master` whose `version_checker.CURRENT_VERSION` has no `v<version>` tag yet builds the zip and publishes a GitHub Release with that tag. Merges that don't bump the version skip the build.
+- Release notes are this version's DEVLOG changelog entry (new `release_notes.py`) followed by GitHub's generated list of merged PRs. The in-app update checker reads `releases/latest`.
+- Also runs on manual dispatch and on PRs that touch the spec, `build.py`, `release_notes.py`, `requirements.txt` or the workflow (artifact only, no release).
 - `build.py` no longer opens Explorer on the dist folder when `CI` is set.
-- Release flow: bump `CURRENT_VERSION`, merge, then `git tag v<version> && git push origin v<version>`.
+- Release flow: bump `CURRENT_VERSION`, add the DEVLOG entry, merge.
 
 ### 2026-10-14 — v6.2.10: Review fixes (PR #7)
 
