@@ -12,6 +12,7 @@
 - [x] Pin crop uses the first wide orange run (no more "11,565" -> "565"); confirm reads back to 1 (v6.2.8)
 - [x] 6↔8 misreads (16,960 -> 16980/18980): prefer 6↔8 on ambiguity, allow two 6↔8 swaps (v6.2.9)
 - [x] PR #7 review fixes: consume WGC frames, re-bind closed sessions, overlay SetWindowPos fallback (v6.2.10)
+- [x] GitHub Action builds the Windows release zip; tags publish a Release (v6.2.11)
 - [ ] Longer term: small digit recognizer trained on HUD-font crops from debug_frames (drops PyTorch/EasyOCR)
 - [ ] Verify in-game on Windows (detection rate while flying, CPU load, bright backgrounds)
 - [ ] Region picker: show box size/position while dragging (hard to hit an 85x40 box blind)

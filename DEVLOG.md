@@ -3,7 +3,7 @@
 **Project:** SC Signature Scanner  
 **Location:** `C:\Users\larse\PycharmProjects\AREA52\SC_Signature_Scanner\`  
 **Developer:** Mallachi  
-**Current Version:** v6.2.10
+**Current Version:** v6.2.11
 **Development Period:** January 8, 2026 - ongoing
 
 ---
@@ -48,6 +48,14 @@ The devlog shall always contain a clear "Current Status" or "Next Steps" section
 ---
 
 ## Changelog
+
+### 2026-10-14 — v6.2.11: Windows build in GitHub Actions
+
+- New `.github/workflows/build-windows.yml` runs `build.py` on `windows-latest` (Python 3.13, CPU-only torch) and uploads `SC_Signature_Scanner_v<version>.zip` as a workflow artifact.
+- Triggers: manual dispatch, `v*` tags, and PRs that touch the spec, `build.py`, `requirements.txt` or the workflow itself.
+- On a tag the job fails unless the tag equals `version_checker.CURRENT_VERSION`, then attaches the zip to a GitHub Release (the in-app update checker reads `releases/latest`).
+- `build.py` no longer opens Explorer on the dist folder when `CI` is set.
+- Release flow: bump `CURRENT_VERSION`, merge, then `git tag v<version> && git push origin v<version>`.
 
 ### 2026-10-14 — v6.2.10: Review fixes (PR #7)
 

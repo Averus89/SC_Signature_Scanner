@@ -1,0 +1,75 @@
+# Builds the Windows release zip with build.py (PyInstaller + SC_Signature_Scanner.spec).
+# Author: Mallachi
+name: Build Windows exe
+
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - "v*"
+  # Catch packaging breakage early when the build inputs change.
+  pull_request:
+    paths:
+      - ".github/workflows/build-windows.yml"
+      - "SC_Signature_Scanner.spec"
+      - "build.py"
+      - "requirements.txt"
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+          cache-dependency-path: requirements.txt
+
+      - name: Read app version
+        id: version
+        shell: pwsh
+        run: |
+          $version = python -c "import version_checker; print(version_checker.CURRENT_VERSION)"
+          "version=$version" >> $env:GITHUB_OUTPUT
+          Write-Host "App version: $version"
+
+      # A release tag must match CURRENT_VERSION, otherwise the in-app
+      # update checker would keep offering the same release.
+      - name: Check tag matches app version
+        if: startsWith(github.ref, 'refs/tags/')
+        shell: pwsh
+        run: |
+          $tag = "${{ github.ref_name }}".TrimStart("v")
+          if ($tag -ne "${{ steps.version.outputs.version }}") {
+            Write-Error "Tag v$tag does not match CURRENT_VERSION ${{ steps.version.outputs.version }}"
+            exit 1
+          }
+
+      # CPU-only torch keeps the bundle far smaller than the default CUDA build.
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install torch torchvision --index-url https://download.pytorch.org/whl/cpu
+          python -m pip install -r requirements.txt pyinstaller
+
+      - name: Build
+        run: python build.py
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: SC_Signature_Scanner_v${{ steps.version.outputs.version }}
+          path: dist/SC_Signature_Scanner_v${{ steps.version.outputs.version }}.zip
+          if-no-files-found: error
+
+      - name: Publish GitHub Release
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: dist/SC_Signature_Scanner_v${{ steps.version.outputs.version }}.zip
+          generate_release_notes: true
