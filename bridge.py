@@ -12,6 +12,7 @@ and placement-mode toggles via `window.onPlacementMode(...)`.
 
 from __future__ import annotations
 
+import ctypes
 import json
 import re
 import threading
@@ -26,6 +27,17 @@ from monitor import ScreenshotMonitor
 from live_capture import LiveCapture
 from window_finder import find_sc_window
 import region_selector
+
+
+# Win32 constants for showing the overlay without activating it (so SC keeps
+# keyboard/mouse focus when a detection popup appears). pywebview's .show()
+# does an activating SW_SHOW on WebView2, which yanks focus out of the game.
+_SW_SHOWNOACTIVATE = 4
+_HWND_TOPMOST = -1
+_SWP_NOMOVE = 0x0002
+_SWP_NOSIZE = 0x0001
+_SWP_NOACTIVATE = 0x0010
+_SWP_SHOWWINDOW = 0x0040
 
 
 class Bridge:
@@ -43,6 +55,10 @@ class Bridge:
     _OVERLAY_BASE_W = 272
     _OVERLAY_BASE_H = 152
     _OVERLAY_PLACEMENT_BASE_H = 200
+
+    # Must match app_webview.py's overlay create_window(title=...). Used to
+    # resolve the overlay HWND for no-activate Win32 ShowWindow calls.
+    _OVERLAY_TITLE = "SC Signature Scanner — Overlay"
 
     def __init__(self, scanner: Any, config: Config) -> None:
         self.scanner = scanner
@@ -944,8 +960,13 @@ class Bridge:
         enriched = {**payload, "duration": duration, "scale": scale}
         self._overlay_last_payload = enriched
         self._push_to_overlay("onOverlayDetection", enriched)
+        # Detection popups MUST NOT steal focus from SC — using a Win32
+        # no-activate show keeps the game's keyboard/mouse focus intact.
+        # Placement mode keeps the activating .show() because the user is
+        # interacting with the scanner UI, not SC, when they enter it.
         try:
-            self._overlay_window.show()
+            if not self._show_overlay_no_activate():
+                self._overlay_window.show()  # fallback if HWND unresolved
             self._overlay_visible = True
         except Exception as e:  # noqa: BLE001
             print(f"[bridge] overlay show failed: {e}")
@@ -958,6 +979,28 @@ class Bridge:
             0.5,
             min(2.0, float(cfg.get("popup_scale", self._SETTINGS_DEFAULTS["popup_scale"]))),
         )
+
+    def _show_overlay_no_activate(self) -> bool:
+        """Show the overlay topmost without stealing focus from the foreground
+        window (typically Star Citizen). pywebview's `.show()` activates the
+        window on WebView2; this calls `ShowWindow(SW_SHOWNOACTIVATE)` plus
+        `SetWindowPos(HWND_TOPMOST, SWP_NOACTIVATE)` instead. Returns True if
+        the HWND was resolved and the show calls were issued.
+        """
+        hwnd = ctypes.windll.user32.FindWindowW(None, self._OVERLAY_TITLE)
+        if not hwnd:
+            return False
+        ctypes.windll.user32.ShowWindow(hwnd, _SW_SHOWNOACTIVATE)
+        ctypes.windll.user32.SetWindowPos(
+            hwnd,
+            _HWND_TOPMOST,
+            0,
+            0,
+            0,
+            0,
+            _SWP_NOMOVE | _SWP_NOSIZE | _SWP_NOACTIVATE | _SWP_SHOWWINDOW,
+        )
+        return True
 
     def _resize_overlay(self, scale: float, with_toolbar: bool = False) -> None:
         if self._overlay_window is None:

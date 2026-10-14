@@ -2,9 +2,9 @@
 
 ---
 
-## Active: v6.2.1 — OCR accuracy on top of WGC capture (branch `claude/project-thread-gtojxg`)
+## Active: v6.2.5 — OCR accuracy on top of WGC capture (branch `feat/wgc-ocr-combined`)
 - [x] Merged `feat/wgc-capture` (WGC replaces mss; app UI can no longer leak into live frames)
-- [x] OCR preprocessing: polarity, contrast stretch, upscale, height-based punctuation filter
+- [x] Substitution correction + multi-frame fusion (v6.2.3/v6.2.4; upscale-only preprocessing)
 - [x] Primary signature by OCR confidence, not max()
 - [ ] Verify in-game on Windows (WGC calibration frame, OCR on bright backgrounds)
 - [ ] Fix live picker pre-drawing the screenshot-mode rect (`region_selector.py`, option C)

@@ -10,6 +10,7 @@ from __future__ import annotations
 import hashlib
 import threading
 import time
+from collections import deque
 from typing import Any, Callable, Literal, Optional
 
 from PIL import Image
@@ -150,6 +151,103 @@ def _crop_bgra(
     return (b"".join(rows), x2 - x1, y2 - y1)
 
 
+def _stable_digest(bgra_bytes: bytes, w: int, h: int) -> bytes:
+    """Perceptual digest robust to subpixel jitter and HUD anti-aliasing.
+
+    Live SC rendering produces minor per-frame variation (anti-aliasing,
+    breathing animations, distance counters) even on visually-static HUD
+    content. Hashing the raw BGRA bytes never produces equal digests across
+    frames, so the stability tracker never fires. Downscaling to 32x16
+    grayscale + 4-bit quantization absorbs that noise while still yielding
+    distinct hashes for actually-different signature values.
+    """
+    img = Image.frombytes("RGB", (w, h), bgra_bytes, "raw", "BGRX")
+    small = img.convert("L").resize((32, 16), Image.BILINEAR)
+    quantized = bytes(p >> 4 for p in small.tobytes())
+    return hashlib.blake2b(quantized, digest_size=8).digest()
+
+
+# Multi-frame super-resolution. The signature renders at ~20px digit height, too
+# small for stable OCR. While a rock is held the loop captures many frames of the
+# same number, each with slightly different sub-pixel jitter and anti-aliasing.
+# Fusing them recovers detail a single frame lacks (like phone "super-res zoom").
+_FUSION_MAX_FRAMES = 8   # ring-buffer depth of recent ROI crops
+_FUSION_SCALE = 4        # upscale factor of the fused output
+
+
+def fuse_frames(
+    raw_crops: list[tuple[bytes, int, int]],
+    scale: int = _FUSION_SCALE,
+) -> Optional[Image.Image]:
+    """Sub-pixel-aligned mean of same-content ROI crops — multi-frame SR.
+
+    Each crop is upscaled to the target grid, registered to the first crop with
+    an ECC translation estimate (sub-pixel at native resolution = whole-pixel on
+    the upscaled grid), then averaged. Averaging sub-pixel-distinct samples on a
+    finer grid reconstructs edge detail and cancels per-frame anti-aliasing
+    noise, which is what makes a steady number read inconsistently frame to
+    frame.
+
+    Args:
+        raw_crops: list of (bgrx_bytes, width, height) for the SAME ROI content.
+            Crops whose size differs from the first are skipped.
+        scale: upscale factor of the fused output.
+
+    Returns:
+        The fused RGB image (size scale*W x scale*H), or None if no usable crop.
+        Alignment is best-effort: if ECC fails to converge (e.g. a flat crop)
+        that frame is averaged un-aligned rather than dropped.
+    """
+    if not raw_crops:
+        return None
+
+    import numpy as np
+
+    decoded: list[Any] = []
+    w0 = h0 = None
+    for buf, w, h in raw_crops:
+        if w0 is None:
+            w0, h0 = w, h
+        if (w, h) != (w0, h0):
+            continue
+        decoded.append(np.asarray(Image.frombytes("RGB", (w, h), buf, "raw", "BGRX")))
+    if not decoded:
+        return None
+
+    try:
+        import cv2
+    except ImportError:
+        # No OpenCV — fall back to a plain upscale of the most recent frame.
+        return Image.fromarray(decoded[-1]).resize((w0 * scale, h0 * scale), Image.LANCZOS)
+
+    target = (w0 * scale, h0 * scale)
+    ups = [cv2.resize(c, target, interpolation=cv2.INTER_LANCZOS4) for c in decoded]
+    if len(ups) == 1:
+        return Image.fromarray(ups[0])
+
+    ref_gray = cv2.cvtColor(ups[0], cv2.COLOR_RGB2GRAY).astype(np.float32)
+    acc = ups[0].astype(np.float32).copy()
+    n = 1
+    criteria = (cv2.TERM_CRITERIA_EPS | cv2.TERM_CRITERIA_COUNT, 50, 1e-4)
+    for u in ups[1:]:
+        gray = cv2.cvtColor(u, cv2.COLOR_RGB2GRAY).astype(np.float32)
+        warp = np.eye(2, 3, dtype=np.float32)
+        try:
+            cv2.findTransformECC(ref_gray, gray, warp, cv2.MOTION_TRANSLATION, criteria, None, 5)
+            aligned = cv2.warpAffine(
+                u, warp, target,
+                flags=cv2.INTER_LINEAR + cv2.WARP_INVERSE_MAP,
+                borderMode=cv2.BORDER_REPLICATE,
+            )
+        except cv2.error:
+            aligned = u  # ECC didn't converge — use the frame un-aligned.
+        acc += aligned.astype(np.float32)
+        n += 1
+
+    fused = (acc / n).clip(0, 255).astype(np.uint8)
+    return Image.fromarray(fused)
+
+
 Status = Literal["stopped", "waiting", "idle_minimized", "running", "error"]
 
 
@@ -206,6 +304,10 @@ class LiveCapture:
         self._wgc_hwnd: Optional[int] = None
         self._frame_lock = threading.Lock()
         self._latest_frame: Optional[tuple[bytes, int, int]] = None
+        # Recent ROI crops (digest, bgrx_bytes, w, h) for multi-frame fusion.
+        self._frame_buffer: deque[tuple[bytes, bytes, int, int]] = deque(
+            maxlen=_FUSION_MAX_FRAMES
+        )
         self._ticks_without_frame: int = 0
         self._thread: Optional[threading.Thread] = None
         self._stop_event = threading.Event()
@@ -240,6 +342,7 @@ class LiveCapture:
             }
         self._region_window_rel = region
         self._tracker.reset()
+        self._frame_buffer.clear()
         self._status = "waiting"
         return {"ok": True}
 
@@ -305,6 +408,7 @@ class LiveCapture:
         if info is None:
             self._stop_wgc()
             self._tracker.reset()
+            self._frame_buffer.clear()
             self._status = "waiting"
             return self._idle_period
 
@@ -322,6 +426,7 @@ class LiveCapture:
                     self.emit({"error": f"WGC session failed: {e}"}, source="live")
                 return self._idle_period
             self._tracker.reset()
+            self._frame_buffer.clear()
 
         if self._wgc is None or not self._wgc.is_active:
             self._status = "error"
@@ -363,16 +468,27 @@ class LiveCapture:
             raw_bgra, frame_w, frame_h, (left, top, left + roi_w, top + roi_h)
         )
 
-        digest = hashlib.blake2b(roi_bytes, digest_size=8).digest()
+        digest = _stable_digest(roi_bytes, roi_w, roi_h)
+        self._frame_buffer.append((digest, roi_bytes, roi_w, roi_h))
         decision = self._tracker.observe(digest)
         self._status = "running"
 
         if decision != "stable_change":
             return self._tick_period
 
+        # Fuse every buffered frame of THIS stabilized content into one
+        # super-resolved image before OCR. Same digest == same displayed value
+        # but sub-pixel-distinct pixels — exactly what multi-frame SR needs.
+        same_content = [
+            (buf, w, h) for (d, buf, w, h) in self._frame_buffer if d == digest
+        ]
         try:
-            img = Image.frombytes("RGB", (roi_w, roi_h), roi_bytes, "raw", "BGRX")
-            result = self.scanner.scan_pil_image(img, region=(0, 0, roi_w, roi_h))
+            img = fuse_frames(same_content) or Image.frombytes(
+                "RGB", (roi_w, roi_h), roi_bytes, "raw", "BGRX"
+            )
+            result = self.scanner.scan_pil_image(
+                img, region=(0, 0, img.width, img.height)
+            )
         except Exception as e:
             if self._emit_empty:
                 self.emit({"error": f"frame decode/OCR failed: {e}"}, source="live")

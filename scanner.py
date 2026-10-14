@@ -18,8 +18,6 @@ from typing import Callable, Dict, List, Any, Optional, Tuple
 from PIL import Image
 import numpy as np
 
-import cv2
-
 import paths
 
 import region_selector
@@ -44,14 +42,29 @@ MIN_SIGNATURE = 100
 MAX_SIGNATURE = 200_000
 
 # OCR image processing
-TARGET_OCR_HEIGHT = 96       # crop height after upscale; EasyOCR reads ~30-60 px glyphs best
-MAX_OCR_UPSCALE = 4          # cap so a tiny crop doesn't turn into blurry mush
-CONTRAST_PERCENTILES = (1, 99)  # ignore outlier pixels when stretching contrast
-MIN_SPECK_AREA = 4           # components smaller than this never vote on glyph height
-MIN_GLYPH_HEIGHT_RATIO = 0.6  # blobs shorter than this × median glyph height are punctuation
+MIN_OCR_DIMENSION = 64       # upscale threshold (pixels)
 
 # Signature matching
 MAX_CLUSTER_COUNT = 100      # sanity cap on rock count (value / base signature)
+
+# OCR digit look-alikes. At the ~20px digit height the SC HUD renders, EasyOCR
+# confuses these glyphs frame-to-frame (e.g. 16,960 read as 18,960 / 18,680).
+# Used by _try_substitution_correction to snap a misread back to a valid
+# signature — but ONLY when the substitution resolves to a single valid
+# signature, so an ambiguous misread is refused rather than guessed.
+_OCR_CONFUSABLE_PAIRS = [
+    ("0", "8"), ("0", "6"), ("0", "9"),
+    ("1", "7"), ("1", "4"),
+    ("2", "7"),
+    ("3", "8"), ("3", "5"), ("3", "9"),
+    ("5", "6"), ("5", "8"),
+    ("6", "8"), ("6", "9"),
+    ("8", "9"),
+]
+_OCR_CONFUSIONS: dict[str, set[str]] = {}
+for _a, _b in _OCR_CONFUSABLE_PAIRS:
+    _OCR_CONFUSIONS.setdefault(_a, set()).add(_b)
+    _OCR_CONFUSIONS.setdefault(_b, set()).add(_a)
 
 # Image loading
 MAX_IMAGE_FILE_SIZE = 50 * 1024 * 1024  # 50 MB — guard against decompression bombs
@@ -316,97 +329,35 @@ class SignatureScanner:
         return None
     
     def _enhance_for_ocr(self, img: Image.Image) -> np.ndarray:
-        """Normalize a signature crop into dark-on-light grayscale for OCR.
+        """Enhance image for OCR.
 
-        Processing steps:
-        1. Grayscale.
-        2. Upscale so the crop is roughly TARGET_OCR_HEIGHT tall.
-        3. Normalize polarity — the SC HUD draws light text on a dark scene,
-           but the punctuation filter (and EasyOCR) want dark text on light.
-        4. Percentile contrast stretch, so text over bright planets or
-           nebulae still separates from the background.
-        5. Remove punctuation (commas/periods) by glyph height.
+        Upscales small crops so EasyOCR has enough pixels to work with. Note we
+        deliberately do NOT run a connected-component "punctuation filter" here:
+        the SC HUD renders bright text on a dark background, so an Otsu/INV
+        threshold treats the background as foreground and the step at best did
+        nothing and at worst erased digit pixels — measured to suppress
+        otherwise-recoverable reads (e.g. 16,960). Separator misreads are
+        handled downstream in _extract_signatures instead.
 
         Args:
             img: Cropped region containing signature
 
         Returns:
-            Grayscale uint8 numpy array (dark text on light) for EasyOCR
+            Numpy array (RGB) ready for EasyOCR
         """
-        gray = np.array(img.convert('L'))
+        # Ensure RGB
+        if img.mode != 'RGB':
+            img = img.convert('RGB')
 
-        scale = min(MAX_OCR_UPSCALE, max(1, -(-TARGET_OCR_HEIGHT // gray.shape[0])))
-        if scale > 1:
-            gray = cv2.resize(
-                gray, None, fx=scale, fy=scale, interpolation=cv2.INTER_CUBIC
+        # Upscale small regions for better detection
+        if img.width < MIN_OCR_DIMENSION or img.height < MIN_OCR_DIMENSION:
+            scale = max(MIN_OCR_DIMENSION // min(img.width, img.height), 2)
+            img = img.resize(
+                (img.width * scale, img.height * scale),
+                Image.Resampling.LANCZOS
             )
 
-        if self._is_light_text(gray):
-            gray = 255 - gray
-
-        lo, hi = np.percentile(gray, CONTRAST_PERCENTILES)
-        if hi > lo:
-            stretched = (gray.astype(np.float32) - lo) * (255.0 / (hi - lo))
-            gray = np.clip(stretched, 0, 255).astype(np.uint8)
-
-        return self._remove_small_components(gray)
-
-    @staticmethod
-    def _is_light_text(gray: np.ndarray) -> bool:
-        """True when the crop is light text on a darker background.
-
-        Text covers less area than background in a signature crop, so the
-        minority side of the Otsu split is the text.
-        """
-        _, binary = cv2.threshold(gray, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
-        return np.count_nonzero(binary) < binary.size / 2
-
-    def _remove_small_components(self, gray: np.ndarray) -> np.ndarray:
-        """Erase punctuation (commas, periods) and specks from the crop.
-
-        OCR misreads separators as digits ("7,400" -> "74400"). Separators
-        are much shorter than digits, and height — unlike area — doesn't
-        depend on the upscale factor, so blobs shorter than
-        MIN_GLYPH_HEIGHT_RATIO × the median glyph height are painted over.
-
-        Args:
-            gray: Grayscale uint8 array, dark text on light background.
-
-        Returns:
-            Copy of `gray` with small components filled with white.
-        """
-        _, binary = cv2.threshold(gray, 0, 255, cv2.THRESH_BINARY_INV + cv2.THRESH_OTSU)
-        num_labels, labels, stats, _ = cv2.connectedComponentsWithStats(binary, connectivity=8)
-
-        # Label 0 is the background.
-        areas = stats[1:, cv2.CC_STAT_AREA]
-        heights = stats[1:, cv2.CC_STAT_HEIGHT]
-        glyph_heights = heights[areas >= MIN_SPECK_AREA]
-        if glyph_heights.size == 0:
-            return gray
-
-        min_height = MIN_GLYPH_HEIGHT_RATIO * float(np.median(glyph_heights))
-        small = np.flatnonzero(heights < min_height) + 1  # back to label ids
-        removed = np.isin(labels, small)
-
-        if self.debug_mode:
-            print(
-                f"[DEBUG] Component filter: removed {small.size} of "
-                f"{num_labels - 1} (min_height={min_height:.1f})"
-            )
-            if small.size:
-                debug_removed = cv2.cvtColor(gray, cv2.COLOR_GRAY2RGB)
-                debug_removed[removed] = [255, 0, 0]  # Red for removed pixels
-                Image.fromarray(debug_removed).save(
-                    self._debug_path("04a_removed_components.png")
-                )
-                self.last_debug_info['debug_files'].append(
-                    f"{self._debug_prefix}04a_removed_components.png"
-                )
-
-        result = gray.copy()
-        result[removed] = 255
-        return result
+        return np.array(img)
 
     def _load_database(self, db_path: Path) -> Dict[str, Any]:
         """Load signature database."""
@@ -576,8 +527,11 @@ class SignatureScanner:
                 # Valid as-is
                 signatures.append(value)
             else:
-                # Try to correct (phantom digit from comma/period separator)
+                # Try to correct: first a phantom digit (comma/period read as a
+                # digit), then a single look-alike-digit substitution.
                 corrected = self._try_correct_signature(value)
+                if corrected is None:
+                    corrected = self._try_substitution_correction(value)
                 if corrected and corrected not in signatures:
                     if self.debug_mode:
                         print(f"[DEBUG] Signature corrected: {value} -> {corrected}")
@@ -587,6 +541,49 @@ class SignatureScanner:
         
         return signatures
     
+    def _try_substitution_correction(self, value: int) -> Optional[int]:
+        """Snap a misread to a valid signature via one look-alike-digit swap.
+
+        At the small digit height the SC HUD renders, EasyOCR confuses glyphs
+        like 6/8/9 — a steady 16,960 is read as 18,960 or 18,680 frame to frame.
+        This tries every single substitution of a digit for one of its OCR
+        look-alikes (`_OCR_CONFUSIONS`) and keeps only results that are valid
+        exact multiples of a known base signature.
+
+        The correction is returned ONLY when exactly one distinct valid
+        signature results. If the misread maps to two or more valid signatures
+        (e.g. 29,620 → 25,620 / 29,600 / 29,680) it is ambiguous and we refuse
+        to guess — returning None avoids fabricating a false lock. Pair this
+        with temporal voting so a unique correction must also recur.
+
+        Args:
+            value: Invalid signature value to attempt to correct.
+
+        Returns:
+            The single valid signature reachable by one look-alike swap, or
+            None if zero or multiple candidates result.
+        """
+        value_str = str(value)
+        candidates: set[int] = set()
+
+        for i, ch in enumerate(value_str):
+            for repl in _OCR_CONFUSIONS.get(ch, ()):
+                cand_str = value_str[:i] + repl + value_str[i + 1 :]
+                if cand_str[0] == "0":  # no leading zeros
+                    continue
+                cand = int(cand_str)
+                if self._is_valid_signature(cand) and self._is_exact_multiple(cand):
+                    candidates.add(cand)
+
+        if len(candidates) == 1:
+            return next(iter(candidates))
+        if self.debug_mode and candidates:
+            print(
+                f"[DEBUG] Substitution for {value} ambiguous: "
+                f"{sorted(candidates)} — refusing to guess"
+            )
+        return None
+
     def _is_valid_signature(self, value: int) -> bool:
         """Check if a value is in valid signature range.
         
