@@ -66,6 +66,8 @@ _OCR_CONFUSIONS: dict[str, set[str]] = {}
 for _a, _b in _OCR_CONFUSABLE_PAIRS:
     _OCR_CONFUSIONS.setdefault(_a, set()).add(_b)
     _OCR_CONFUSIONS.setdefault(_b, set()).add(_a)
+# The dominant live confusion; preferred when a correction is otherwise ambiguous.
+_SIX_EIGHT = {"6": "8", "8": "6"}
 
 # Image loading
 MAX_IMAGE_FILE_SIZE = 50 * 1024 * 1024  # 50 MB — guard against decompression bombs
@@ -592,23 +594,52 @@ class SignatureScanner:
         """
         value_str = str(value)
         candidates: set[int] = set()
+        six_eight: set[int] = set()  # candidates reached by a 6<->8 swap
 
         for i, ch in enumerate(value_str):
             for repl in _OCR_CONFUSIONS.get(ch, ()):
-                cand_str = value_str[:i] + repl + value_str[i + 1 :]
-                if cand_str[0] == "0":  # no leading zeros
-                    continue
-                cand = int(cand_str)
-                if self._is_valid_signature(cand) and self._is_exact_multiple(cand):
+                cand = self._valid_swap(value_str, {i: repl})
+                if cand is not None:
                     candidates.add(cand)
+                    if {ch, repl} == {"6", "8"}:
+                        six_eight.add(cand)
 
         if len(candidates) == 1:
             return next(iter(candidates))
+        # 6<->8 dominates live misreads (16,960 read as 16980 on most frames),
+        # so when a single swap is ambiguous, a unique 6<->8 candidate wins.
+        if len(six_eight) == 1:
+            return next(iter(six_eight))
+        if not candidates:
+            # Both 6s of 16,960 read as 8s ("18980"): allow exactly two
+            # 6<->8 swaps, again only when the result is unique.
+            pairs = {
+                self._valid_swap(value_str, {i: _SIX_EIGHT[value_str[i]], j: _SIX_EIGHT[value_str[j]]})
+                for i in range(len(value_str))
+                for j in range(i + 1, len(value_str))
+                if value_str[i] in _SIX_EIGHT and value_str[j] in _SIX_EIGHT
+            }
+            pairs.discard(None)
+            if len(pairs) == 1:
+                return next(iter(pairs))
         if self.debug_mode and candidates:
             print(
                 f"[DEBUG] Substitution for {value} ambiguous: "
                 f"{sorted(candidates)} — refusing to guess"
             )
+        return None
+
+    def _valid_swap(self, value_str: str, swaps: dict[int, str]) -> Optional[int]:
+        """Apply digit swaps {position: digit}; return the value if it is a
+        valid exact-multiple signature without a leading zero, else None."""
+        digits = list(value_str)
+        for i, d in swaps.items():
+            digits[i] = d
+        if digits[0] == "0":
+            return None
+        cand = int("".join(digits))
+        if self._is_valid_signature(cand) and self._is_exact_multiple(cand):
+            return cand
         return None
 
     def _is_valid_signature(self, value: int) -> bool:

@@ -49,6 +49,20 @@ The devlog shall always contain a clear "Current Status" or "Next Steps" section
 
 ## Changelog
 
+### 2026-10-14 — v6.2.9: Prefer 6↔8 when a misread is ambiguous
+
+Branch `feat/timed-ocr`. In game 6.2.8 read every rock well except 16,960.
+
+**Cause.** At HUD digit height EasyOCR swaps 6 and 8. 16,960 came out as "16980" (single-swap candidates 16,960 via 8→6 and 16,900 via 8→0 — refused as ambiguous) or "18980" (both 6s wrong; no single swap is valid). Across today's debug output 6↔8 is by far the most common confusion.
+
+**Fix.** `_try_substitution_correction`: (1) if single swaps are ambiguous but exactly one candidate is a 6↔8 swap, take it; (2) if no single swap is valid, allow exactly two 6↔8 swaps when that yields a unique valid signature. Other ambiguous misreads (e.g. 29,620) are still refused.
+
+**Replay (all 1,137 crops saved today, 6.2.8 vs 6.2.9, with the 0.45 confidence floor).** 153 reads changed, all from no read to 16,960, and every one of those crops shows 16,960 (checked visually): 153 fixed, 0 regressed, everything else unchanged. Accepted risk: a real 16,900 misread as 16980 would show as 16,960.
+
+**Tests.** "16980"→16960, "18980"→16960, "11585"→11565; 29620, 18880 and 187980 stay rejected. 78 pass.
+
+---
+
 ### 2026-10-14 — v6.2.8: Pin crop no longer eats digits; single-read popups again
 
 Branch `feat/timed-ocr`. v6.2.7 tested worse in game (13:00–13:09 session, 73 OCR runs, 3 rocks: 25,440 / 16,960 / 11,565).

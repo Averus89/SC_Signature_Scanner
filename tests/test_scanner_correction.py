@@ -31,10 +31,27 @@ def test_unique_substitution_recovers_signature():
 def test_ambiguous_substitution_is_refused():
     """When two or more valid signatures are reachable, refuse rather than guess."""
     s = _scanner()
-    # 29,620 -> 25,620 / 29,600 / 29,680 are all valid; ambiguous => None.
+    # 29,620 -> 25,620 / 29,600 / 29,680 are all valid and none is a 6<->8
+    # swap; ambiguous => None.
     assert s._try_substitution_correction(29620) is None
-    # 16,980 -> 16,780 / 16,900 / 16,960 are all valid; ambiguous => None.
-    assert s._try_substitution_correction(16980) is None
+
+
+def test_ambiguous_misread_prefers_the_unique_six_eight_swap():
+    """16,960 is read as 16980 on most live frames; of its candidates
+    (16,960 via 8->6, 16,900 via 8->0) only one is a 6<->8 swap."""
+    s = _scanner()
+    assert s._try_substitution_correction(16980) == 16960
+
+
+def test_two_six_eight_swaps_recover_both_sixes_read_as_eights():
+    s = _scanner()
+    assert s._try_substitution_correction(18980) == 16960
+    assert s._extract_signatures("18.980") == [16960]
+
+
+def test_single_six_eight_swap_still_recovers():
+    s = _scanner()
+    assert s._try_substitution_correction(11585) == 11565
 
 
 def test_unrecoverable_substitution_returns_none():
@@ -42,7 +59,8 @@ def test_unrecoverable_substitution_returns_none():
     s = _scanner()
     # The real 16,960 is three substitutions from 18,880 — not recoverable.
     assert s._try_substitution_correction(18880) is None
-    assert s._try_substitution_correction(18980) is None
+    # Needs a 7->1 or 9->8 swap plus more; neither is unique or 6<->8-only.
+    assert s._try_substitution_correction(187980) is None
 
 
 def test_extract_applies_correction_to_misread():
