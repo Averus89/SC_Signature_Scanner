@@ -2,6 +2,16 @@
 
 ---
 
+## Active: v6.1.1 — Live capture isolation + OCR accuracy (branch `claude/project-thread-gtojxg`)
+- [x] Hide console/overlay and raise SC before live calibration grab
+- [x] 3×3 grid occlusion probe in live loop
+- [x] OCR preprocessing: polarity, contrast stretch, upscale, height-based punctuation filter
+- [x] Primary signature by OCR confidence, not max()
+- [ ] Verify in-game on Windows (calibration frame, partial overlap, OCR on bright backgrounds)
+- [ ] Fix live picker pre-drawing the screenshot-mode rect (`region_selector.py`, option C)
+
+---
+
 ## Active: v6.0.0 — Webview UI Migration (branch `feat/webview-migration`)
 
 Replacing the tkinter UI with a React console hosted in pywebview, in six vertical-slice phases. Each phase is shippable on its own; tkinter `main.py` remains runnable in parallel until phase 6.

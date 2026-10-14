@@ -44,10 +44,11 @@ MIN_SIGNATURE = 100
 MAX_SIGNATURE = 200_000
 
 # OCR image processing
-MIN_OCR_DIMENSION = 64       # upscale threshold (pixels)
-MIN_COMPONENT_AREA = 50      # smallest blob kept — removes commas/periods
-MAX_COMPONENT_AREA_SMALL = 30  # threshold for 'small' component filter pass
-MAX_COMPONENT_AREA_LARGE = 100  # threshold for 'large' component filter pass
+TARGET_OCR_HEIGHT = 96       # crop height after upscale; EasyOCR reads ~30-60 px glyphs best
+MAX_OCR_UPSCALE = 4          # cap so a tiny crop doesn't turn into blurry mush
+CONTRAST_PERCENTILES = (1, 99)  # ignore outlier pixels when stretching contrast
+MIN_SPECK_AREA = 4           # components smaller than this never vote on glyph height
+MIN_GLYPH_HEIGHT_RATIO = 0.6  # blobs shorter than this × median glyph height are punctuation
 
 # Signature matching
 MAX_CLUSTER_COUNT = 100      # sanity cap on rock count (value / base signature)
@@ -299,7 +300,9 @@ class SignatureScanner:
                 f.write(f"Signatures found: {signatures}\n")
         
         if signatures:
-            primary_sig = max(signatures)
+            # _ocr_signature orders by detection confidence; trusting the
+            # most confident read beats max(), which let stray digits win.
+            primary_sig = signatures[0]
             matches = self.match_signature(primary_sig)
             return {
                 'signature': primary_sig,
@@ -313,110 +316,98 @@ class SignatureScanner:
         return None
     
     def _enhance_for_ocr(self, img: Image.Image) -> np.ndarray:
-        """Enhance image for OCR.
-        
+        """Normalize a signature crop into dark-on-light grayscale for OCR.
+
         Processing steps:
-        1. Convert to RGB numpy array
-        2. Upscale small regions for better detection
-        3. Remove small connected components (commas, periods, noise)
-           - Commas/periods are ~5-20 pixels, digits are 100+ pixels
-           - This prevents OCR from misreading punctuation as digits
-        
+        1. Grayscale.
+        2. Upscale so the crop is roughly TARGET_OCR_HEIGHT tall.
+        3. Normalize polarity — the SC HUD draws light text on a dark scene,
+           but the punctuation filter (and EasyOCR) want dark text on light.
+        4. Percentile contrast stretch, so text over bright planets or
+           nebulae still separates from the background.
+        5. Remove punctuation (commas/periods) by glyph height.
+
         Args:
             img: Cropped region containing signature
-        
+
         Returns:
-            Numpy array (RGB) ready for EasyOCR
+            Grayscale uint8 numpy array (dark text on light) for EasyOCR
         """
-        # Ensure RGB
-        if img.mode != 'RGB':
-            img = img.convert('RGB')
-        
-        # Upscale small regions for better detection
-        scale = 1
-        if img.width < MIN_OCR_DIMENSION or img.height < MIN_OCR_DIMENSION:
-            scale = max(MIN_OCR_DIMENSION // min(img.width, img.height), 2)
-            img = img.resize(
-                (img.width * scale, img.height * scale),
-                Image.Resampling.LANCZOS
+        gray = np.array(img.convert('L'))
+
+        scale = min(MAX_OCR_UPSCALE, max(1, -(-TARGET_OCR_HEIGHT // gray.shape[0])))
+        if scale > 1:
+            gray = cv2.resize(
+                gray, None, fx=scale, fy=scale, interpolation=cv2.INTER_CUBIC
             )
-        
-        img_array = np.array(img)
-        
-        # Remove small connected components (commas, periods, noise)
-        # This prevents OCR from misreading punctuation as digits
-        img_array = self._remove_small_components(img_array)
-        
-        return img_array
-    
-    def _remove_small_components(self, img_array: np.ndarray, min_area: int = MIN_COMPONENT_AREA) -> np.ndarray:
-        """Remove small connected components from image.
-        
-        Commas and periods are tiny (~5-20 pixels) compared to digits (100+ pixels).
-        By removing small components, we prevent OCR from misreading punctuation.
-        
-        Args:
-            img_array: RGB numpy array
-            min_area: Minimum component area to keep (pixels). Default 50.
-        
-        Returns:
-            Cleaned RGB numpy array with small components removed
+
+        if self._is_light_text(gray):
+            gray = 255 - gray
+
+        lo, hi = np.percentile(gray, CONTRAST_PERCENTILES)
+        if hi > lo:
+            stretched = (gray.astype(np.float32) - lo) * (255.0 / (hi - lo))
+            gray = np.clip(stretched, 0, 255).astype(np.uint8)
+
+        return self._remove_small_components(gray)
+
+    @staticmethod
+    def _is_light_text(gray: np.ndarray) -> bool:
+        """True when the crop is light text on a darker background.
+
+        Text covers less area than background in a signature crop, so the
+        minority side of the Otsu split is the text.
         """
-        # Convert to grayscale
-        gray = cv2.cvtColor(img_array, cv2.COLOR_RGB2GRAY)
-        
-        # Binary threshold - find dark elements (text) on light background
-        # Use adaptive threshold for varying backgrounds
-        # THRESH_BINARY_INV: dark pixels become white (foreground)
+        _, binary = cv2.threshold(gray, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
+        return np.count_nonzero(binary) < binary.size / 2
+
+    def _remove_small_components(self, gray: np.ndarray) -> np.ndarray:
+        """Erase punctuation (commas, periods) and specks from the crop.
+
+        OCR misreads separators as digits ("7,400" -> "74400"). Separators
+        are much shorter than digits, and height — unlike area — doesn't
+        depend on the upscale factor, so blobs shorter than
+        MIN_GLYPH_HEIGHT_RATIO × the median glyph height are painted over.
+
+        Args:
+            gray: Grayscale uint8 array, dark text on light background.
+
+        Returns:
+            Copy of `gray` with small components filled with white.
+        """
         _, binary = cv2.threshold(gray, 0, 255, cv2.THRESH_BINARY_INV + cv2.THRESH_OTSU)
-        
-        # Find connected components
-        num_labels, labels, stats, centroids = cv2.connectedComponentsWithStats(binary, connectivity=8)
-        
-        # Create mask of components to keep (large enough to be digits)
-        mask = np.zeros(binary.shape, dtype=np.uint8)
-        
-        removed_count = 0
-        kept_count = 0
-        
-        for i in range(1, num_labels):  # Skip background (label 0)
-            area = stats[i, cv2.CC_STAT_AREA]
-            if area >= min_area:
-                # Keep this component
-                mask[labels == i] = 255
-                kept_count += 1
-            else:
-                removed_count += 1
-        
+        num_labels, labels, stats, _ = cv2.connectedComponentsWithStats(binary, connectivity=8)
+
+        # Label 0 is the background.
+        areas = stats[1:, cv2.CC_STAT_AREA]
+        heights = stats[1:, cv2.CC_STAT_HEIGHT]
+        glyph_heights = heights[areas >= MIN_SPECK_AREA]
+        if glyph_heights.size == 0:
+            return gray
+
+        min_height = MIN_GLYPH_HEIGHT_RATIO * float(np.median(glyph_heights))
+        small = np.flatnonzero(heights < min_height) + 1  # back to label ids
+        removed = np.isin(labels, small)
+
         if self.debug_mode:
-            print(f"[DEBUG] Component filter: kept {kept_count}, removed {removed_count} (min_area={min_area})")
-        
-        # Apply mask to original image
-        # Where mask is 0 (removed components), replace with background color
-        # Estimate background as median color of non-text pixels
-        bg_mask = binary == 0  # Original background pixels
-        if np.any(bg_mask):
-            bg_color = np.median(img_array[bg_mask], axis=0).astype(np.uint8)
-        else:
-            bg_color = np.array([128, 128, 128], dtype=np.uint8)  # Fallback gray
-        
-        # Create output image
-        result = img_array.copy()
-        
-        # Where we removed components (mask is 0 but binary had content), fill with background
-        removed_pixels = (binary == 255) & (mask == 0)
-        result[removed_pixels] = bg_color
-        
-        if self.debug_mode and removed_count > 0:
-            # Save debug image showing what was removed
-            debug_removed = img_array.copy()
-            debug_removed[removed_pixels] = [255, 0, 0]  # Red for removed pixels
-            debug_pil = Image.fromarray(debug_removed)
-            debug_pil.save(self._debug_path("04a_removed_components.png"))
-            self.last_debug_info['debug_files'].append(f"{self._debug_prefix}04a_removed_components.png")
-        
+            print(
+                f"[DEBUG] Component filter: removed {small.size} of "
+                f"{num_labels - 1} (min_height={min_height:.1f})"
+            )
+            if small.size:
+                debug_removed = cv2.cvtColor(gray, cv2.COLOR_GRAY2RGB)
+                debug_removed[removed] = [255, 0, 0]  # Red for removed pixels
+                Image.fromarray(debug_removed).save(
+                    self._debug_path("04a_removed_components.png")
+                )
+                self.last_debug_info['debug_files'].append(
+                    f"{self._debug_prefix}04a_removed_components.png"
+                )
+
+        result = gray.copy()
+        result[removed] = 255
         return result
-    
+
     def _load_database(self, db_path: Path) -> Dict[str, Any]:
         """Load signature database."""
         if db_path.exists():
@@ -518,22 +509,22 @@ class SignatureScanner:
             if self.debug_mode:
                 print(f"[DEBUG] EasyOCR raw results: {results}")
 
-            # Extract text and confidence
-            texts = []
-            confidences = []
+            # detection = (bbox, text, confidence)
+            detections = [(d[1], d[2]) for d in results if len(d) >= 3]
 
-            for detection in results:
-                # detection = (bbox, text, confidence)
-                if len(detection) >= 3:
-                    bbox, text, conf = detection[0], detection[1], detection[2]
-                    texts.append(text)
-                    confidences.append(conf)
-
-            combined_text = ' '.join(texts)
+            combined_text = ' '.join(text for text, _ in detections)
+            confidences = [conf for _, conf in detections]
             avg_confidence = sum(confidences) / len(confidences) if confidences else 0.0
 
-            # Extract signature values
-            signatures = self._extract_signatures(combined_text)
+            # Most confident detection first, so callers can trust
+            # signatures[0]; the combined text goes last to catch a number
+            # EasyOCR split across two boxes.
+            by_confidence = sorted(detections, key=lambda d: d[1], reverse=True)
+            signatures: list[int] = []
+            for text in [t for t, _ in by_confidence] + [combined_text]:
+                for sig in self._extract_signatures(text):
+                    if sig not in signatures:
+                        signatures.append(sig)
 
             return signatures, combined_text, avg_confidence
 

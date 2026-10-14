@@ -252,6 +252,23 @@ def test_tick_skips_capture_when_sc_is_occluded_by_another_window():
     emit.assert_not_called()
 
 
+def test_tick_skips_capture_when_another_window_covers_only_a_corner():
+    """A window overlapping just the ROI's bottom-right corner (e.g. this
+    app's console or overlay) must still count as occlusion — the old
+    centre-only probe let its pixels into OCR."""
+    win = WindowInfo(hwnd=1, client_rect=(0, 0, 1920, 1080), is_minimized=False, is_foreground=False)
+    # ROI is (0, 0, 100, 30); the occluder covers x >= 80, y >= 20.
+    live, emit = _make_live(
+        window=win,
+        window_from_point=lambda pt: 999 if pt[0] >= 80 and pt[1] >= 20 else 1,
+    )
+    live.start_for_tests()
+    live.tick()
+    assert live.status == "idle_occluded"
+    live.scanner.scan_pil_image.assert_not_called()
+    emit.assert_not_called()
+
+
 def test_tick_proceeds_when_sc_is_topmost_at_capture_point():
     """SC IS topmost at the capture point — capture proceeds and (with stable
     content + matched OCR) eventually emits."""

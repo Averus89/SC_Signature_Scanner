@@ -15,6 +15,7 @@ from __future__ import annotations
 import json
 import re
 import threading
+import time
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Optional
@@ -124,26 +125,61 @@ class Bridge:
             return self.start_engagement()
         return {"ok": True}
 
+    # Time for the minimize animation and SC's next frame to land before we
+    # screen-scrape; without it the grab still shows this app's console.
+    _CALIBRATION_SETTLE_S = 0.5
+
     def calibrate_region_live(self) -> dict[str, Any]:
         """One-shot: grab the SC client area, open the region picker on that
-        image, persist the rect window-relative."""
-        info = find_sc_window()
-        if info is None:
+        image, persist the rect window-relative.
+
+        mss.grab is a desktop screen-scrape, so the console and overlay are
+        moved out of the way and SC is raised before grabbing — otherwise
+        the calibration frame shows this app instead of the HUD.
+        """
+        if find_sc_window() is None:
             return {"ok": False, "error": "Star Citizen not running"}
 
-        x, y, w, h = info.client_rect
-        with mss.mss() as sct:
-            shot = sct.grab({"left": x, "top": y, "width": w, "height": h})
+        self.hide_overlay()
+        try:
+            if self._main_window is not None:
+                self._main_window.minimize()
+            info = self._raise_sc_window()
+            if info is None:
+                return {"ok": False, "error": "Star Citizen not running"}
+            if info.is_minimized:
+                return {
+                    "ok": False,
+                    "error": "Star Citizen is minimized — restore it, then calibrate.",
+                }
 
-        from PIL import Image as _Image
-        img = _Image.frombytes(
-            "RGB", (shot.width, shot.height), bytes(shot.raw), "raw", "BGRX"
-        )
+            x, y, w, h = info.client_rect
+            with mss.mss() as sct:
+                shot = sct.grab({"left": x, "top": y, "width": w, "height": h})
 
-        import region_selector
-        selector = region_selector.RegionSelector(parent=None)
-        selector.open(image=img, save_as_window_relative=True)
-        return {"ok": True}
+            from PIL import Image as _Image
+            img = _Image.frombytes(
+                "RGB", (shot.width, shot.height), bytes(shot.raw), "raw", "BGRX"
+            )
+
+            selector = region_selector.RegionSelector(parent=None)
+            selector.open(image=img, save_as_window_relative=True)
+            return {"ok": True}
+        finally:
+            self._restore_main_window()
+
+    def _raise_sc_window(self) -> Any | None:
+        """Best-effort bring SC to the foreground, wait for it to repaint,
+        and return a fresh WindowInfo (or None if SC disappeared)."""
+        info = find_sc_window()
+        if info is not None and not info.is_minimized:
+            try:
+                import win32gui
+                win32gui.SetForegroundWindow(info.hwnd)
+            except Exception as e:  # noqa: BLE001 — Windows may refuse focus steal
+                print(f"[bridge] SetForegroundWindow failed: {e}")
+        time.sleep(self._CALIBRATION_SETTLE_S)
+        return find_sc_window()
 
     def find_sc_window_status(self) -> dict[str, Any]:
         """For the Scanner module's status pill."""

@@ -3,7 +3,7 @@
 **Project:** SC Signature Scanner  
 **Location:** `C:\Users\larse\PycharmProjects\AREA52\SC_Signature_Scanner\`  
 **Developer:** Mallachi  
-**Current Version:** v5.0.0
+**Current Version:** v6.1.1
 **Development Period:** January 8, 2026 - ongoing
 
 ---
@@ -48,6 +48,20 @@ The devlog shall always contain a clear "Current Status" or "Next Steps" section
 ---
 
 ## Changelog
+
+### 2026-10-14 — v6.1.1: Live capture isolation + OCR preprocessing
+
+Branch `claude/project-thread-gtojxg`. Fixes two user-reported problems: live mode OCR'ing the app's own UI, and poor OCR accuracy on the HUD.
+
+**1. Calibration grab no longer shows the console.** `bridge.calibrate_region_live` now hides the overlay, minimizes the main console, raises SC (`SetForegroundWindow`, best effort) and waits 0.5 s before `mss.grab`. Previously the screen-scrape ran with the console on top of SC, so users drew the ROI on a picture of this app. Refuses with a clear error if SC is minimized.
+
+**2. Occlusion check covers the whole ROI.** `LiveCapture.tick` probes a 3×3 grid (`occlusion_probe_points`) with `WindowFromPoint` instead of only the centre pixel. The console or the always-on-top overlay overlapping part of the ROI used to leak into OCR (the overlay could even re-trigger on its own text). Grid chosen over z-order walking because `WindowFromPoint` already skips click-through overlays (Discord/NVIDIA), which a z-order walk would report as occluders forever.
+
+**3. OCR preprocessing.** `_enhance_for_ocr` now: grayscale → upscale towards 96 px tall (cap 4×, cubic) → polarity normalisation (Otsu minority = text; invert light-on-dark HUD) → 1–99 percentile contrast stretch → punctuation removal. The old filter thresholded with `THRESH_BINARY_INV` assuming dark text, so on the light-on-dark HUD it never removed commas (verified: 0 pixels changed on a synthetic "8,060"). Punctuation is now removed by height (< 0.6 × median glyph height) rather than a fixed 50 px area, which broke as soon as the upscale factor changed.
+
+**4. Primary signature = most confident read.** `_ocr_signature` orders signatures by detection confidence (combined text last, for numbers split across boxes); `_scan_region` takes `signatures[0]` instead of `max()`, which let stray large readings win.
+
+**Tests.** New `tests/test_scanner_preprocess.py` (polarity, upscale, comma removal both polarities, digit counters preserved, confidence ordering); corner-occlusion loop test; probe-point geometry test. Real-game verification pending on Windows.
 
 ### 2026-05-27 — v6.1.0: Live window capture
 

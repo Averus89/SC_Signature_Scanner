@@ -123,6 +123,26 @@ def compute_abs_capture_rect(
     return (cx + x1, cy + y1, w, h)
 
 
+def occlusion_probe_points(
+    rect: tuple[int, int, int, int],
+) -> list[tuple[int, int]]:
+    """Return a 3x3 grid of screen points covering the capture rect.
+
+    Corners are inset by one pixel so every point lies inside the rect
+    (mss rects are half-open: the pixel at left + width is outside).
+
+    Args:
+        rect: (left, top, width, height) in screen coords.
+
+    Returns:
+        Nine (x, y) points: corners, edge midpoints and the centre.
+    """
+    left, top, w, h = rect
+    xs = (left, left + w // 2, left + w - 1)
+    ys = (top, top + h // 2, top + h - 1)
+    return [(x, y) for y in ys for x in xs]
+
+
 Status = Literal["stopped", "waiting", "idle_minimized", "idle_occluded", "running", "error"]
 
 
@@ -300,17 +320,17 @@ class LiveCapture:
 
         # Occlusion check: mss.grab is a desktop screen-scrape and returns
         # whatever window is topmost at the captured pixels. If SC isn't
-        # the topmost window at the center of our capture rect, the bytes
-        # we'd grab are from a different window (Explorer, an OSD, the
-        # taskbar, etc.) — interpreting them as HUD content produces
-        # garbage OCR. Skip the capture and surface the state to the UI.
-        cx, cy, cw, ch = self._abs_capture_rect
-        center_pt = (cx + cw // 2, cy + ch // 2)
-        top_root = self._window_from_point(center_pt)
-        if top_root and top_root != info.hwnd:
-            self._tracker.reset()
-            self._status = "idle_occluded"
-            return self._idle_period
+        # the topmost window anywhere in our capture rect, the bytes we'd
+        # grab partly belong to a different window (this app's console or
+        # overlay, Explorer, the taskbar, etc.) — interpreting them as HUD
+        # content produces garbage OCR. A single centre probe missed windows
+        # overlapping only part of the ROI, so probe a 3x3 grid instead.
+        for pt in occlusion_probe_points(self._abs_capture_rect):
+            top_root = self._window_from_point(pt)
+            if top_root and top_root != info.hwnd:
+                self._tracker.reset()
+                self._status = "idle_occluded"
+                return self._idle_period
 
         try:
             shot = (self._mss or self._mss_factory()).grab({
