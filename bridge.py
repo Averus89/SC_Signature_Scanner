@@ -999,13 +999,14 @@ class Bridge:
         window (typically Star Citizen). pywebview's `.show()` activates the
         window on WebView2; this calls `ShowWindow(SW_SHOWNOACTIVATE)` plus
         `SetWindowPos(HWND_TOPMOST, SWP_NOACTIVATE)` instead. Returns True if
-        the HWND was resolved and the show calls were issued.
+        SetWindowPos succeeded (ShowWindow's return is the previous visibility,
+        not success), so the caller falls back to `.show()` otherwise.
         """
         hwnd = ctypes.windll.user32.FindWindowW(None, self._OVERLAY_TITLE)
         if not hwnd:
             return False
         ctypes.windll.user32.ShowWindow(hwnd, _SW_SHOWNOACTIVATE)
-        ctypes.windll.user32.SetWindowPos(
+        positioned = ctypes.windll.user32.SetWindowPos(
             hwnd,
             _HWND_TOPMOST,
             0,
@@ -1014,7 +1015,7 @@ class Bridge:
             0,
             _SWP_NOMOVE | _SWP_NOSIZE | _SWP_NOACTIVATE | _SWP_SHOWWINDOW,
         )
-        return True
+        return bool(positioned)
 
     def _resize_overlay(self, scale: float, with_toolbar: bool = False) -> None:
         if self._overlay_window is None:

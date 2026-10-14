@@ -479,11 +479,17 @@ class LiveCapture:
             self._reset_detection()
 
         if self._wgc is None or not self._wgc.is_active:
+            # WGC can close a session while the window survives (e.g. device
+            # loss); dropping it lets the next tick re-bind via the hwnd check.
+            self._stop_wgc()
             self._status = "error"
             return self._idle_period
 
+        # Consume the frame so a stalled session can't keep re-OCRing stale
+        # pixels and the no-frame threshold actually counts.
         with self._frame_lock:
             frame = self._latest_frame
+            self._latest_frame = None
 
         if frame is None:
             self._ticks_without_frame += 1

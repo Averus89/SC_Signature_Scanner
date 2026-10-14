@@ -2,7 +2,7 @@
 
 ---
 
-## Active: v6.2.9 — Live detection that actually fires (branch `feat/timed-ocr`)
+## Active: v6.2.10 — Live detection that actually fires (branch `feat/timed-ocr`)
 - [x] Merged `feat/wgc-capture` (WGC replaces mss; app UI can no longer leak into live frames)
 - [x] Substitution correction + multi-frame fusion (v6.2.3/v6.2.4; upscale-only preprocessing)
 - [x] Primary signature by OCR confidence, not max()
@@ -11,6 +11,7 @@
 - [x] Strip the map-pin icon before OCR; min confidence 0.45; 2-read confirmation (v6.2.7)
 - [x] Pin crop uses the first wide orange run (no more "11,565" -> "565"); confirm reads back to 1 (v6.2.8)
 - [x] 6↔8 misreads (16,960 -> 16980/18980): prefer 6↔8 on ambiguity, allow two 6↔8 swaps (v6.2.9)
+- [x] PR #7 review fixes: consume WGC frames, re-bind closed sessions, overlay SetWindowPos fallback (v6.2.10)
 - [ ] Longer term: small digit recognizer trained on HUD-font crops from debug_frames (drops PyTorch/EasyOCR)
 - [ ] Verify in-game on Windows (detection rate while flying, CPU load, bright backgrounds)
 - [ ] Region picker: show box size/position while dragging (hard to hit an 85x40 box blind)

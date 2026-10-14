@@ -3,7 +3,7 @@
 **Project:** SC Signature Scanner  
 **Location:** `C:\Users\larse\PycharmProjects\AREA52\SC_Signature_Scanner\`  
 **Developer:** Mallachi  
-**Current Version:** v6.2.1
+**Current Version:** v6.2.10
 **Development Period:** January 8, 2026 - ongoing
 
 ---
@@ -48,6 +48,13 @@ The devlog shall always contain a clear "Current Status" or "Next Steps" section
 ---
 
 ## Changelog
+
+### 2026-10-14 — v6.2.10: Review fixes (PR #7)
+
+- `LiveCapture.tick` consumes each WGC frame. A stalled session no longer re-OCRs stale pixels forever, and the 90-tick no-frame error can actually trigger.
+- An inactive WGC session (closed by WGC while SC's window survives, e.g. device loss) is torn down, so the next tick re-binds instead of staying in `error` until re-engage.
+- `_show_overlay_no_activate` reports `SetWindowPos` success (`ShowWindow` returns the previous visibility, not success), so the `.show()` fallback runs when positioning fails.
+- New loop tests for frame consumption and session re-bind.
 
 ### 2026-10-14 — v6.2.9: Prefer 6↔8 when a misread is ambiguous
 

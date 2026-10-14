@@ -295,3 +295,28 @@ def test_roi_clamp_to_smaller_frame_yields_degenerate_error():
     sessions[1].push_frame(b"\x00" * (100 * 50 * 4), 100, 50)
     live.tick()
     assert live.status == "error"
+
+
+def test_each_frame_is_ocrd_at_most_once():
+    """A stalled session must not keep re-OCRing the last frame it delivered."""
+    live, _, sessions, clock = _make_live(window=WIN, scan_result=HIT)
+    live.start_for_tests()
+    live.tick()  # binds the session
+    _frame_tick(live, sessions, clock, 0x10)
+    clock.now += INTERVAL
+    live.tick()  # no new frame arrived
+    assert live.scanner.scan_pil_image.call_count == 1
+
+
+def test_session_closed_under_same_window_is_rebound_on_next_tick():
+    """WGC can close a session while SC's window survives (e.g. device loss)."""
+    live, _, sessions, _ = _make_live(window=WIN)
+    live.start_for_tests()
+    live.tick()
+    first = sessions[1]
+    first.is_active = False  # what on_closed does
+    live.tick()
+    assert live.status == "error"
+    live.tick()
+    assert sessions[1] is not first
+    assert sessions[1].is_active
