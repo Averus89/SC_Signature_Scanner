@@ -1,11 +1,12 @@
 # SC Signature Scanner
 
-[![Buy Me A Coffee](https://img.shields.io/badge/Buy%20Me%20A%20Coffee-Support-orange?style=flat&logo=buy-me-a-coffee)](https://buymeacoffee.com/Mallachi)
+[![Buy Me A Coffee](https://img.shields.io/badge/Buy%20Me%20A%20Coffee-Support-orange?style=flat&logo=buy-me-a-coffee)](https://buymeacoffee.com/Averus89)
 
 Real-time signature identification for Star Citizen. Drop a screenshot in your watched folder, the scanner reads the HUD signature with **EasyOCR**, looks the value up against a database extracted from `Game2.dcb`, and shows the match as a tier-colored overlay floating over the running game.
 
 **Version:** 6.0.0
-**Author:** Mallachi
+**Author:** Mallachi (original)  
+**Maintainer:** Averus89 (this fork)
 **Game Version:** Star Citizen 4.7+
 
 ---
@@ -92,7 +93,7 @@ Real-time signature identification for Star Citizen. Drop a screenshot in your w
 ### For developers (Python from source)
 
 ```bash
-git clone https://github.com/Diftic/SC_Signature_Scanner.git
+git clone https://github.com/Averus89/SC_Signature_Scanner.git
 cd SC_Signature_Scanner
 pip install -r requirements.txt
 python app_webview.py
@@ -213,7 +214,8 @@ Signatures extracted directly from Star Citizen game files (`Game2.dcb` via `Dat
 
 ## Credits
 
-- **Developer:** Mallachi
+- **Original developer:** Mallachi
+- **Fork maintainer:** Averus89
 - **Test crew:** Raychaser (Regolith.Rocks), iambass, Mavyre
 - ✦ *In memory of Regolith.Rocks — The Industrial Community*
 
@@ -221,6 +223,12 @@ Signatures extracted directly from Star Citizen game files (`Game2.dcb` via `Dat
 
 ## License
 
-MIT License — Free to use, modify, and distribute. See [LICENSE](LICENSE) for details.
+MIT License — Free to use, modify, and distribute. See [LICENSE](LICENSE) for details. Bundled third-party components are listed in [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
+
+---
+
+## Support
+
+SC Signature Scanner is free and stays free; every feature works without donating. If you'd like to support continued development of this fork, you can [buy me a coffee](https://buymeacoffee.com/Averus89). Donations go to Averus89, the fork maintainer, not to the original author.
 
 *Not affiliated with Cloud Imperium Games or Roberts Space Industries.*
