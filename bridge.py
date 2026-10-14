@@ -15,7 +15,6 @@ from __future__ import annotations
 import json
 import re
 import threading
-import time
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Optional
@@ -26,7 +25,6 @@ from config import Config
 from monitor import ScreenshotMonitor
 from live_capture import LiveCapture
 from window_finder import find_sc_window
-import mss
 import region_selector
 
 
@@ -125,61 +123,46 @@ class Bridge:
             return self.start_engagement()
         return {"ok": True}
 
-    # Time for the minimize animation and SC's next frame to land before we
-    # screen-scrape; without it the grab still shows this app's console.
-    _CALIBRATION_SETTLE_S = 0.5
-
     def calibrate_region_live(self) -> dict[str, Any]:
-        """One-shot: grab the SC client area, open the region picker on that
-        image, persist the rect window-relative.
-
-        mss.grab is a desktop screen-scrape, so the console and overlay are
-        moved out of the way and SC is raised before grabbing — otherwise
-        the calibration frame shows this app instead of the HUD.
-        """
-        if find_sc_window() is None:
+        """One-shot: start a brief WGC session against the SC window, capture
+        the first delivered frame, hand it to the region picker, persist the
+        rect as window-relative."""
+        info = find_sc_window()
+        if info is None:
             return {"ok": False, "error": "Star Citizen not running"}
 
-        self.hide_overlay()
+        import threading
+        from wgc_capture import WGCSession, WGCError
+
+        frame_ready = threading.Event()
+        captured: list[tuple[bytes, int, int]] = []
+
+        def cb(raw: bytes, w: int, h: int) -> None:
+            if captured:
+                return
+            captured.append((raw, w, h))
+            frame_ready.set()
+
+        session = WGCSession(info.hwnd, on_frame=cb)
         try:
-            if self._main_window is not None:
-                self._main_window.minimize()
-            info = self._raise_sc_window()
-            if info is None:
-                return {"ok": False, "error": "Star Citizen not running"}
-            if info.is_minimized:
-                return {
-                    "ok": False,
-                    "error": "Star Citizen is minimized — restore it, then calibrate.",
-                }
+            session.start()
+        except WGCError as e:
+            return {"ok": False, "error": str(e)}
 
-            x, y, w, h = info.client_rect
-            with mss.mss() as sct:
-                shot = sct.grab({"left": x, "top": y, "width": w, "height": h})
+        ok = frame_ready.wait(timeout=5.0)
+        session.stop()
 
-            from PIL import Image as _Image
-            img = _Image.frombytes(
-                "RGB", (shot.width, shot.height), bytes(shot.raw), "raw", "BGRX"
-            )
+        if not ok or not captured:
+            return {"ok": False, "error": "WGC didn't deliver a frame in 5 seconds"}
 
-            selector = region_selector.RegionSelector(parent=None)
-            selector.open(image=img, save_as_window_relative=True)
-            return {"ok": True}
-        finally:
-            self._restore_main_window()
+        raw, w, h = captured[0]
+        from PIL import Image as _Image
+        img = _Image.frombytes("RGB", (w, h), raw, "raw", "BGRX")
 
-    def _raise_sc_window(self) -> Any | None:
-        """Best-effort bring SC to the foreground, wait for it to repaint,
-        and return a fresh WindowInfo (or None if SC disappeared)."""
-        info = find_sc_window()
-        if info is not None and not info.is_minimized:
-            try:
-                import win32gui
-                win32gui.SetForegroundWindow(info.hwnd)
-            except Exception as e:  # noqa: BLE001 — Windows may refuse focus steal
-                print(f"[bridge] SetForegroundWindow failed: {e}")
-        time.sleep(self._CALIBRATION_SETTLE_S)
-        return find_sc_window()
+        import region_selector
+        selector = region_selector.RegionSelector(parent=None)
+        selector.open(image=img, save_as_window_relative=True)
+        return {"ok": True}
 
     def find_sc_window_status(self) -> dict[str, Any]:
         """For the Scanner module's status pill."""

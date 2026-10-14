@@ -1,5 +1,5 @@
 """compute_abs_capture_rect — clamp the window-relative region inside the client rect."""
-from live_capture import compute_abs_capture_rect, occlusion_probe_points
+from live_capture import compute_abs_capture_rect
 
 
 def test_simple_case_returns_translated_rect():
@@ -35,10 +35,3 @@ def test_negative_client_origin_supported_for_left_of_primary_monitor():
     client = (-1920, 0, 1920, 1080)
     region_window_rel = (100, 50, 220, 80)
     assert compute_abs_capture_rect(client, region_window_rel) == (-1820, 50, 120, 30)
-
-
-def test_occlusion_probe_points_cover_corners_edges_and_centre_inside_rect():
-    pts = occlusion_probe_points((100, 200, 120, 30))
-    assert len(pts) == 9
-    assert (100, 200) in pts and (219, 229) in pts and (160, 215) in pts
-    assert all(100 <= x < 220 and 200 <= y < 230 for x, y in pts)

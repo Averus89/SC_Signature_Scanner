@@ -2,12 +2,11 @@
 
 ---
 
-## Active: v6.1.1 — Live capture isolation + OCR accuracy (branch `claude/project-thread-gtojxg`)
-- [x] Hide console/overlay and raise SC before live calibration grab
-- [x] 3×3 grid occlusion probe in live loop
+## Active: v6.2.1 — OCR accuracy on top of WGC capture (branch `claude/project-thread-gtojxg`)
+- [x] Merged `feat/wgc-capture` (WGC replaces mss; app UI can no longer leak into live frames)
 - [x] OCR preprocessing: polarity, contrast stretch, upscale, height-based punctuation filter
 - [x] Primary signature by OCR confidence, not max()
-- [ ] Verify in-game on Windows (calibration frame, partial overlap, OCR on bright backgrounds)
+- [ ] Verify in-game on Windows (WGC calibration frame, OCR on bright backgrounds)
 - [ ] Fix live picker pre-drawing the screenshot-mode rect (`region_selector.py`, option C)
 
 ---
