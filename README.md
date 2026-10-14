@@ -1,6 +1,6 @@
 # SC Signature Scanner
 
-[![Buy Me A Coffee](https://img.shields.io/badge/Buy%20Me%20A%20Coffee-Support-orange?style=flat&logo=buy-me-a-coffee)](https://buymeacoffee.com/Averus89)
+[![Buy Me A Coffee](https://img.shields.io/badge/Buy%20Me%20A%20Coffee-Support-orange?style=flat&logo=buy-me-a-coffee)](https://buymeacoffee.com/averus)
 
 Real-time signature identification for Star Citizen. Drop a screenshot in your watched folder, the scanner reads the HUD signature with **EasyOCR**, looks the value up against a database extracted from `Game2.dcb`, and shows the match as a tier-colored overlay floating over the running game.
 
@@ -229,6 +229,6 @@ MIT License — Free to use, modify, and distribute. See [LICENSE](LICENSE) for 
 
 ## Support
 
-SC Signature Scanner is free and stays free; every feature works without donating. If you'd like to support continued development of this fork, you can [buy me a coffee](https://buymeacoffee.com/Averus89). Donations go to Averus89, the fork maintainer, not to the original author.
+SC Signature Scanner is free and stays free; every feature works without donating. If you'd like to support continued development of this fork, you can [buy me a coffee](https://buymeacoffee.com/averus). Donations go to Averus89, the fork maintainer, not to the original author.
 
 *Not affiliated with Cloud Imperium Games or Roberts Space Industries.*

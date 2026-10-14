@@ -51,7 +51,7 @@ The devlog shall always contain a clear "Current Status" or "Next Steps" section
 
 ### 2026-10-14 — v6.2.12: Fork maintainer, donations and notices
 
-- Donation links (README badge, `.github/FUNDING.yml`, landing page) now point to the fork maintainer's Buy Me a Coffee (`buymeacoffee.com/Averus89`). Donations are optional; no feature is gated.
+- Donation links (README badge, `.github/FUNDING.yml`, landing page) now point to the fork maintainer's Buy Me a Coffee (`buymeacoffee.com/averus`). Donations are optional; no feature is gated.
 - Credits keep Mallachi as original author and add Averus89 as fork maintainer (README, About panel, landing page footer, `LICENSE` copyright line).
 - Update checker (`version_checker.GITHUB_OWNER`), clone URL and landing-page download links point to `Averus89/SC_Signature_Scanner`. Download buttons go to `releases/latest`, since releases ship a zip, not a bare exe.
 - New `THIRD_PARTY_NOTICES.md` lists bundled components and their licenses; `build.py` puts it and `LICENSE` in the release zip.
