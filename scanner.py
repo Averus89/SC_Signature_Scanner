@@ -18,8 +18,6 @@ from typing import Callable, Dict, List, Any, Optional, Tuple
 from PIL import Image
 import numpy as np
 
-import cv2
-
 import paths
 
 import region_selector
@@ -45,12 +43,31 @@ MAX_SIGNATURE = 200_000
 
 # OCR image processing
 MIN_OCR_DIMENSION = 64       # upscale threshold (pixels)
-MIN_COMPONENT_AREA = 50      # smallest blob kept — removes commas/periods
-MAX_COMPONENT_AREA_SMALL = 30  # threshold for 'small' component filter pass
-MAX_COMPONENT_AREA_LARGE = 100  # threshold for 'large' component filter pass
+CONTRAST_PERCENTILES = (1, 99)  # ignore outlier pixels when stretching contrast
 
 # Signature matching
 MAX_CLUSTER_COUNT = 100      # sanity cap on rock count (value / base signature)
+
+# OCR digit look-alikes. At the ~20px digit height the SC HUD renders, EasyOCR
+# confuses these glyphs frame-to-frame (e.g. 16,960 read as 18,960 / 18,680).
+# Used by _try_substitution_correction to snap a misread back to a valid
+# signature — but ONLY when the substitution resolves to a single valid
+# signature, so an ambiguous misread is refused rather than guessed.
+_OCR_CONFUSABLE_PAIRS = [
+    ("0", "8"), ("0", "6"), ("0", "9"),
+    ("1", "7"), ("1", "4"),
+    ("2", "7"),
+    ("3", "8"), ("3", "5"), ("3", "9"),
+    ("5", "6"), ("5", "8"),
+    ("6", "8"), ("6", "9"),
+    ("8", "9"),
+]
+_OCR_CONFUSIONS: dict[str, set[str]] = {}
+for _a, _b in _OCR_CONFUSABLE_PAIRS:
+    _OCR_CONFUSIONS.setdefault(_a, set()).add(_b)
+    _OCR_CONFUSIONS.setdefault(_b, set()).add(_a)
+# The dominant live confusion; preferred when a correction is otherwise ambiguous.
+_SIX_EIGHT = {"6": "8", "8": "6"}
 
 # Image loading
 MAX_IMAGE_FILE_SIZE = 50 * 1024 * 1024  # 50 MB — guard against decompression bombs
@@ -299,7 +316,9 @@ class SignatureScanner:
                 f.write(f"Signatures found: {signatures}\n")
         
         if signatures:
-            primary_sig = max(signatures)
+            # _ocr_signature orders by detection confidence; trusting the
+            # most confident read beats max(), which let stray digits win.
+            primary_sig = signatures[0]
             matches = self.match_signature(primary_sig)
             return {
                 'signature': primary_sig,
@@ -314,109 +333,61 @@ class SignatureScanner:
     
     def _enhance_for_ocr(self, img: Image.Image) -> np.ndarray:
         """Enhance image for OCR.
-        
-        Processing steps:
-        1. Convert to RGB numpy array
-        2. Upscale small regions for better detection
-        3. Remove small connected components (commas, periods, noise)
-           - Commas/periods are ~5-20 pixels, digits are 100+ pixels
-           - This prevents OCR from misreading punctuation as digits
-        
+
+        Upscales small crops so EasyOCR has enough pixels to work with. Note we
+        deliberately do NOT run a connected-component "punctuation filter" here:
+        the SC HUD renders bright text on a dark background, so an Otsu/INV
+        threshold treats the background as foreground and the step at best did
+        nothing and at worst erased digit pixels — measured to suppress
+        otherwise-recoverable reads (e.g. 16,960). Separator misreads are
+        handled downstream in _extract_signatures instead.
+
+        After upscaling, the crop is normalized to dark text on a light,
+        full-range background. A label drawn over a bright asteroid is
+        light-on-light-grey with only a few levels of contrast, which EasyOCR
+        misreads (e.g. 25,440 -> "3"); stretching restores the separation.
+
         Args:
             img: Cropped region containing signature
-        
+
         Returns:
-            Numpy array (RGB) ready for EasyOCR
+            Grayscale uint8 numpy array (dark text on light) for EasyOCR
         """
-        # Ensure RGB
-        if img.mode != 'RGB':
-            img = img.convert('RGB')
-        
         # Upscale small regions for better detection
-        scale = 1
         if img.width < MIN_OCR_DIMENSION or img.height < MIN_OCR_DIMENSION:
             scale = max(MIN_OCR_DIMENSION // min(img.width, img.height), 2)
             img = img.resize(
                 (img.width * scale, img.height * scale),
                 Image.Resampling.LANCZOS
             )
-        
-        img_array = np.array(img)
-        
-        # Remove small connected components (commas, periods, noise)
-        # This prevents OCR from misreading punctuation as digits
-        img_array = self._remove_small_components(img_array)
-        
-        return img_array
-    
-    def _remove_small_components(self, img_array: np.ndarray, min_area: int = MIN_COMPONENT_AREA) -> np.ndarray:
-        """Remove small connected components from image.
-        
-        Commas and periods are tiny (~5-20 pixels) compared to digits (100+ pixels).
-        By removing small components, we prevent OCR from misreading punctuation.
-        
-        Args:
-            img_array: RGB numpy array
-            min_area: Minimum component area to keep (pixels). Default 50.
-        
-        Returns:
-            Cleaned RGB numpy array with small components removed
+
+        return self._normalize_contrast(np.array(img.convert('L')))
+
+    @staticmethod
+    def _normalize_contrast(gray: np.ndarray) -> np.ndarray:
+        """Make text dark on light and stretch it to the full 0-255 range.
+
+        Text covers less of a signature crop than background does, so the
+        minority side of an Otsu split is taken to be the text.
         """
-        # Convert to grayscale
-        gray = cv2.cvtColor(img_array, cv2.COLOR_RGB2GRAY)
-        
-        # Binary threshold - find dark elements (text) on light background
-        # Use adaptive threshold for varying backgrounds
-        # THRESH_BINARY_INV: dark pixels become white (foreground)
-        _, binary = cv2.threshold(gray, 0, 255, cv2.THRESH_BINARY_INV + cv2.THRESH_OTSU)
-        
-        # Find connected components
-        num_labels, labels, stats, centroids = cv2.connectedComponentsWithStats(binary, connectivity=8)
-        
-        # Create mask of components to keep (large enough to be digits)
-        mask = np.zeros(binary.shape, dtype=np.uint8)
-        
-        removed_count = 0
-        kept_count = 0
-        
-        for i in range(1, num_labels):  # Skip background (label 0)
-            area = stats[i, cv2.CC_STAT_AREA]
-            if area >= min_area:
-                # Keep this component
-                mask[labels == i] = 255
-                kept_count += 1
-            else:
-                removed_count += 1
-        
-        if self.debug_mode:
-            print(f"[DEBUG] Component filter: kept {kept_count}, removed {removed_count} (min_area={min_area})")
-        
-        # Apply mask to original image
-        # Where mask is 0 (removed components), replace with background color
-        # Estimate background as median color of non-text pixels
-        bg_mask = binary == 0  # Original background pixels
-        if np.any(bg_mask):
-            bg_color = np.median(img_array[bg_mask], axis=0).astype(np.uint8)
-        else:
-            bg_color = np.array([128, 128, 128], dtype=np.uint8)  # Fallback gray
-        
-        # Create output image
-        result = img_array.copy()
-        
-        # Where we removed components (mask is 0 but binary had content), fill with background
-        removed_pixels = (binary == 255) & (mask == 0)
-        result[removed_pixels] = bg_color
-        
-        if self.debug_mode and removed_count > 0:
-            # Save debug image showing what was removed
-            debug_removed = img_array.copy()
-            debug_removed[removed_pixels] = [255, 0, 0]  # Red for removed pixels
-            debug_pil = Image.fromarray(debug_removed)
-            debug_pil.save(self._debug_path("04a_removed_components.png"))
-            self.last_debug_info['debug_files'].append(f"{self._debug_prefix}04a_removed_components.png")
-        
-        return result
-    
+        hist = np.bincount(gray.ravel(), minlength=256).astype(np.float64)
+        levels = np.arange(256)
+        weight_lo = np.cumsum(hist)
+        weight_hi = weight_lo[-1] - weight_lo
+        sum_lo = np.cumsum(hist * levels)
+        mean_lo = sum_lo / np.maximum(weight_lo, 1)
+        mean_hi = (sum_lo[-1] - sum_lo) / np.maximum(weight_hi, 1)
+        threshold = int(np.argmax(weight_lo * weight_hi * (mean_lo - mean_hi) ** 2))
+
+        if np.count_nonzero(gray > threshold) < gray.size / 2:
+            gray = 255 - gray
+
+        lo, hi = np.percentile(gray, CONTRAST_PERCENTILES)
+        if hi <= lo:
+            return gray
+        stretched = (gray.astype(np.float32) - lo) * (255.0 / (hi - lo))
+        return np.clip(stretched, 0, 255).astype(np.uint8)
+
     def _load_database(self, db_path: Path) -> Dict[str, Any]:
         """Load signature database."""
         if db_path.exists():
@@ -518,22 +489,22 @@ class SignatureScanner:
             if self.debug_mode:
                 print(f"[DEBUG] EasyOCR raw results: {results}")
 
-            # Extract text and confidence
-            texts = []
-            confidences = []
+            # detection = (bbox, text, confidence)
+            detections = [(d[1], d[2]) for d in results if len(d) >= 3]
 
-            for detection in results:
-                # detection = (bbox, text, confidence)
-                if len(detection) >= 3:
-                    bbox, text, conf = detection[0], detection[1], detection[2]
-                    texts.append(text)
-                    confidences.append(conf)
-
-            combined_text = ' '.join(texts)
+            combined_text = ' '.join(text for text, _ in detections)
+            confidences = [conf for _, conf in detections]
             avg_confidence = sum(confidences) / len(confidences) if confidences else 0.0
 
-            # Extract signature values
-            signatures = self._extract_signatures(combined_text)
+            # Most confident detection first, so callers can trust
+            # signatures[0]; the combined text goes last to catch a number
+            # EasyOCR split across two boxes.
+            by_confidence = sorted(detections, key=lambda d: d[1], reverse=True)
+            signatures: list[int] = []
+            for text in [t for t, _ in by_confidence] + [combined_text]:
+                for sig in self._extract_signatures(text):
+                    if sig not in signatures:
+                        signatures.append(sig)
 
             return signatures, combined_text, avg_confidence
 
@@ -585,8 +556,11 @@ class SignatureScanner:
                 # Valid as-is
                 signatures.append(value)
             else:
-                # Try to correct (phantom digit from comma/period separator)
+                # Try to correct: first a phantom digit (comma/period read as a
+                # digit), then a single look-alike-digit substitution.
                 corrected = self._try_correct_signature(value)
+                if corrected is None:
+                    corrected = self._try_substitution_correction(value)
                 if corrected and corrected not in signatures:
                     if self.debug_mode:
                         print(f"[DEBUG] Signature corrected: {value} -> {corrected}")
@@ -596,6 +570,78 @@ class SignatureScanner:
         
         return signatures
     
+    def _try_substitution_correction(self, value: int) -> Optional[int]:
+        """Snap a misread to a valid signature via one look-alike-digit swap.
+
+        At the small digit height the SC HUD renders, EasyOCR confuses glyphs
+        like 6/8/9 — a steady 16,960 is read as 18,960 or 18,680 frame to frame.
+        This tries every single substitution of a digit for one of its OCR
+        look-alikes (`_OCR_CONFUSIONS`) and keeps only results that are valid
+        exact multiples of a known base signature.
+
+        The correction is returned ONLY when exactly one distinct valid
+        signature results. If the misread maps to two or more valid signatures
+        (e.g. 29,620 → 25,620 / 29,600 / 29,680) it is ambiguous and we refuse
+        to guess — returning None avoids fabricating a false lock. Pair this
+        with temporal voting so a unique correction must also recur.
+
+        Args:
+            value: Invalid signature value to attempt to correct.
+
+        Returns:
+            The single valid signature reachable by one look-alike swap, or
+            None if zero or multiple candidates result.
+        """
+        value_str = str(value)
+        candidates: set[int] = set()
+        six_eight: set[int] = set()  # candidates reached by a 6<->8 swap
+
+        for i, ch in enumerate(value_str):
+            for repl in _OCR_CONFUSIONS.get(ch, ()):
+                cand = self._valid_swap(value_str, {i: repl})
+                if cand is not None:
+                    candidates.add(cand)
+                    if {ch, repl} == {"6", "8"}:
+                        six_eight.add(cand)
+
+        if len(candidates) == 1:
+            return next(iter(candidates))
+        # 6<->8 dominates live misreads (16,960 read as 16980 on most frames),
+        # so when a single swap is ambiguous, a unique 6<->8 candidate wins.
+        if len(six_eight) == 1:
+            return next(iter(six_eight))
+        if not candidates:
+            # Both 6s of 16,960 read as 8s ("18980"): allow exactly two
+            # 6<->8 swaps, again only when the result is unique.
+            pairs = {
+                self._valid_swap(value_str, {i: _SIX_EIGHT[value_str[i]], j: _SIX_EIGHT[value_str[j]]})
+                for i in range(len(value_str))
+                for j in range(i + 1, len(value_str))
+                if value_str[i] in _SIX_EIGHT and value_str[j] in _SIX_EIGHT
+            }
+            pairs.discard(None)
+            if len(pairs) == 1:
+                return next(iter(pairs))
+        if self.debug_mode and candidates:
+            print(
+                f"[DEBUG] Substitution for {value} ambiguous: "
+                f"{sorted(candidates)} — refusing to guess"
+            )
+        return None
+
+    def _valid_swap(self, value_str: str, swaps: dict[int, str]) -> Optional[int]:
+        """Apply digit swaps {position: digit}; return the value if it is a
+        valid exact-multiple signature without a leading zero, else None."""
+        digits = list(value_str)
+        for i, d in swaps.items():
+            digits[i] = d
+        if digits[0] == "0":
+            return None
+        cand = int("".join(digits))
+        if self._is_valid_signature(cand) and self._is_exact_multiple(cand):
+            return cand
+        return None
+
     def _is_valid_signature(self, value: int) -> bool:
         """Check if a value is in valid signature range.
         

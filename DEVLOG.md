@@ -3,7 +3,7 @@
 **Project:** SC Signature Scanner  
 **Location:** `C:\Users\larse\PycharmProjects\AREA52\SC_Signature_Scanner\`  
 **Developer:** Mallachi  
-**Current Version:** v5.0.0
+**Current Version:** v6.2.10
 **Development Period:** January 8, 2026 - ongoing
 
 ---
@@ -48,6 +48,346 @@ The devlog shall always contain a clear "Current Status" or "Next Steps" section
 ---
 
 ## Changelog
+
+### 2026-10-14 — v6.2.10: Review fixes (PR #7)
+
+- `LiveCapture.tick` consumes each WGC frame. A stalled session no longer re-OCRs stale pixels forever, and the 90-tick no-frame error can actually trigger.
+- An inactive WGC session (closed by WGC while SC's window survives, e.g. device loss) is torn down, so the next tick re-binds instead of staying in `error` until re-engage.
+- `_show_overlay_no_activate` reports `SetWindowPos` success (`ShowWindow` returns the previous visibility, not success), so the `.show()` fallback runs when positioning fails.
+- New loop tests for frame consumption and session re-bind.
+
+### 2026-10-14 — v6.2.9: Prefer 6↔8 when a misread is ambiguous
+
+Branch `feat/timed-ocr`. In game 6.2.8 read every rock well except 16,960.
+
+**Cause.** At HUD digit height EasyOCR swaps 6 and 8. 16,960 came out as "16980" (single-swap candidates 16,960 via 8→6 and 16,900 via 8→0 — refused as ambiguous) or "18980" (both 6s wrong; no single swap is valid). Across today's debug output 6↔8 is by far the most common confusion.
+
+**Fix.** `_try_substitution_correction`: (1) if single swaps are ambiguous but exactly one candidate is a 6↔8 swap, take it; (2) if no single swap is valid, allow exactly two 6↔8 swaps when that yields a unique valid signature. Other ambiguous misreads (e.g. 29,620) are still refused.
+
+**Replay (all 1,137 crops saved today, 6.2.8 vs 6.2.9, with the 0.45 confidence floor).** 153 reads changed, all from no read to 16,960, and every one of those crops shows 16,960 (checked visually): 153 fixed, 0 regressed, everything else unchanged. Accepted risk: a real 16,900 misread as 16980 would show as 16,960.
+
+**Tests.** "16980"→16960, "18980"→16960, "11585"→11565; 29620, 18880 and 187980 stay rejected. 78 pass.
+
+---
+
+### 2026-10-14 — v6.2.8: Pin crop no longer eats digits; single-read popups again
+
+Branch `feat/timed-ocr`. v6.2.7 tested worse in game (13:00–13:09 session, 73 OCR runs, 3 rocks: 25,440 / 16,960 / 11,565).
+
+**What went wrong.**
+- The pin crop took the *rightmost* orange-heavy column. Thin "1"s with overlapping chromatic fringes also cross the threshold, so "11,565" was cropped to "565" (27 runs, read "565"/"585" at 0.83–1.00 confidence → no signature). 25,440 lost its first digit in places ("58", "344").
+- 2-read confirmation was too strict: most rocks are never read correctly twice in a row before the player moves on.
+- 16,960 is read as 16980/18980 (6↔8 at small digit height); the look-alike correction rightly refuses 16980 as ambiguous (16,780 / 16,900 / 16,960). Only 6 of 32 intact 16,960 crops read correctly with or without contrast normalization, so this is an OCR limit, not a v6.2.7 regression; confirmation just turned "rarely" into "never".
+
+**Fix.**
+- `strip_marker_icon` crops at the end of the FIRST run of orange-heavy columns that is ≥ 5% of the crop width (the pin), never further right.
+- `live_confirm_reads` default 2 → 1. Confidence floor 0.45 and the 3-empty-read re-arm stay.
+
+**Replay (popups / wrong / rocks covered).** Session A (12:45–12:56, 11 rock values): 6.2.6 34 / 14 / 11; 6.2.7 8–10 / 1–3 / 6; 6.2.8 18 / 2 / 11. Session B (images already v1-cropped, so the digit-eating fix can't be replayed): 6.2.6 8 / 3 / 3; 6.2.7 2 / 1 / 1; 6.2.8 rules 5 / 1 / 3. Contrast normalization re-checked: with pin crop 43 vs 34 correct of 49 without it — kept.
+
+**Open.** 16,960-style 6↔8 misreads need a better recognizer (e.g. a small digit model trained on the HUD font) — added to TODO.
+
+---
+
+### 2026-10-14 — v6.2.7: Stop wrong and flipping live popups
+
+Branch `feat/timed-ocr`. After v6.2.6 live detection fired, but some popups did not match the screen and the popup flipped 2000 → 3200 → 2000.
+
+**Root cause (from 180 OCR runs of a real session, 12:45–12:56, 49 with a signature).** The 85×40 ROI also contains the orange map-pin icon drawn left of the number. OCR reads the pin as a leading "2" or "9": `9.2000` → "9.200" → look-alike correction → 3200; `9.4000` → 94000; `2.10000` → 2400; 10,000 → `21000`. Labelled against what the crops show: 25 of 40 reads correct, 15 wrong; 34 popups, 14 wrong. The true 2,000 popups were correct — that rock really showed 2,000. No crop without a label produced a signature in this session; the "asteroid read as a number" cases were labels over bright rock misread at low confidence (17,200 → 7200 / 44200 at 0.30–0.39).
+
+**Fix (live mode only).**
+- `strip_marker_icon`: crop away the pin before OCR. The pin is a solid orange block (42–45% of a column's pixels orange); digits only carry thin chromatic fringes (≤ 21%). Columns ≥ 25% orange in the left 60% of the crop mark the pin. Masking orange pixels instead was tried and destroyed the digits (1/40 correct). Crop alone: 34/40 correct, 4 wrong, 2 none.
+- Minimum OCR confidence 0.45 (`live_min_confidence`): the 4 remaining wrong reads all scored ≤ 0.39; true reads mostly 0.55–0.99. Costs 1 true read (0.35) in this set. Low-confidence reads are ignored rather than treated as empty.
+- `SignatureConfirmer` (`live_confirm_reads`, default 2): a value reaches the popup only after 2 identical reads in a row, so one misread can never flip it. Re-arming the same value needs 3 empty reads in a row (~1.2 s of looking away), so a flickering empty read doesn't repeat the popup.
+- Replay of the session: old rules 34 popups / 14 wrong; new rules 8 popups / 0 wrong (one per rock visit). Trade-off: labels read correctly only once between empty reads (21,500, 17,200, 11,565, 14,000 in this session) no longer pop up.
+
+**Tests.** New `tests/test_live_capture_confirm.py` (A,B,A never emits; A,A emits; A,A,B,B switches; flicker vs look-away re-arm; pin crop on/off). Loop tests for the confidence floor and confirmation. 74 pass.
+
+---
+
+### 2026-10-14 — v6.2.6: Timed live OCR + contrast normalization
+
+Branch `feat/timed-ocr` (on top of `feat/wgc-ocr-combined`). Fixes "no detection" in live mode.
+
+**Root cause.** Live OCR only ran after the ROI's perceptual digest repeated for 3 consecutive ticks (`StabilityTracker`). The digest covers the whole ROI, including the space and asteroids behind the signature label, so while the player flies or turns it never repeats. Measured live: 0 stable events in 443 samples (15 s at 30 Hz). The gate only fired on still, empty space, which is why every debug crop showed stars. In a gameplay recording the label sat in the ROI for ~10 s (12:33:28–38) with zero OCR runs. Larger ROIs made it worse (more background).
+
+**Fix.**
+- `LiveCapture` OCRs the latest ROI every `ocr_interval_s` (config `live_ocr_interval_s`, default 0.4 s, clamped 0.1–5 s; no UI control) regardless of motion. OCR on a signature-sized crop is ~30–40 ms, so ~10% of one core.
+- Emits only when the signature differs from the last emitted one; an empty read clears that memo, so looking away and back fires again. Window/hwnd changes reset it.
+- Fusion is kept: buffered crops with the same digest are still fused. While the view moves that is usually one frame, so it degrades to a plain upscale.
+- `StabilityTracker` and its tests removed (no remaining users). An optional "skip OCR on empty crops" pre-check was considered and not added: a label over a bright rock has only ~20 grey levels of range, the same as empty space, so a brightness/contrast pre-check would skip exactly the hard case.
+
+**Contrast normalization.** `_enhance_for_ocr` now converts the upscaled crop to grayscale, flips light-on-dark to dark-on-light (Otsu minority = text) and applies a 1–99 percentile stretch. Pure numpy; still no punctuation/component filter (the v6.2.3 finding stands). On the 60 real crops available (today's debug output + live grabs) it fixed 2 misses (25,440 over a bright rock read as "3"; one 17,200 grab), regressed 0, and produced no false reads on 54 empty crops. The v6.2.3 set of 76 crops no longer exists, so a fresh labelled set is a TODO.
+
+**Region note.** The signature label renders next to the target marker and its width/position shifts by ~10–20 px between rocks; a 38×18 ROI clipped digits. The ROI was set to 85×40 at (2540,490)-(2625,530) on a 5120×1440 display.
+
+**Tests.** `tests/test_live_capture_loop.py` rewritten around a fake clock (fires on the interval while the image changes, throttles between intervals, no re-emit of the same value, re-emit after an empty read, reset on window change). New `tests/test_scanner_contrast.py`. `tests/test_live_capture_stability.py` removed.
+
+---
+
+### 2026-10-14 — v6.2.5: Primary signature = most confident OCR read
+
+Branch `feat/wgc-ocr-combined` (WGC capture + v6.2.3/v6.2.4 OCR work + the OCR fix from `claude/project-thread-gtojxg`).
+
+**Change.** `_ocr_signature` orders signatures by detection confidence (combined text last, for numbers split across boxes); `_scan_region` takes `signatures[0]` instead of `max()`, which let stray large readings win.
+
+**Dropped in the merge.** `claude/project-thread-gtojxg` also carried a reworked `_enhance_for_ocr` (polarity normalisation, contrast stretch, height-based punctuation filter) and live-capture isolation fixes (hide console before an mss calibration grab; 3×3 `WindowFromPoint` occlusion grid). The preprocessing was dropped in favour of the v6.2.3 upscale-only path, which was validated on real crops and pairs with v6.2.4 fusion. The isolation fixes were dropped because WGC captures SC's swap-chain directly, so other windows can't leak into the frame.
+
+**Tests.** Confidence-ordering test added to `tests/test_scanner_correction.py`.
+
+---
+
+### 2026-06-02 — v6.2.4: Multi-frame super-resolution before OCR
+
+Branch `feat/wgc-capture`. Follow-up to v6.2.3. The remaining hard case
+(16,960 readable on only ~1 in 6 frames) is fundamentally a *resolution*
+problem: the signature renders at ~20px digit height, below where EasyOCR is
+stable, and there is no in-game UI-scale slider to enlarge it.
+
+**Approach.** Plain upscaling cannot add detail that was never captured. But
+while a rock is held the loop captures many frames of the *same* value, each
+with slightly different sub-pixel jitter and anti-aliasing. Fusing them adds
+real information (the same principle as phone "super-res zoom"). This requires
+no game settings change and reuses frames we already capture.
+
+**Implementation.**
+- New `fuse_frames(raw_crops, scale=4)` in `live_capture.py`: upscales each
+  same-content crop to the target grid (LANCZOS4), registers each to the first
+  with an ECC translation estimate (`cv2.findTransformECC`, `MOTION_TRANSLATION`)
+  — sub-pixel at native = whole-pixel on the upscaled grid — then averages.
+  Averaging sub-pixel-distinct samples on a finer grid reconstructs edge detail
+  and cancels per-frame anti-aliasing noise. Alignment is best-effort: a frame
+  whose ECC fails to converge (e.g. a flat crop) is averaged un-aligned rather
+  than dropped, so the helper never throws on degenerate input.
+- `LiveCapture` keeps an 8-deep ring buffer of recent ROI crops keyed by their
+  stability digest. On `stable_change` it fuses every buffered frame sharing the
+  current digest (same displayed value, sub-pixel-distinct pixels) and OCRs the
+  fused image. Because the `empty_rearm` retry loop keeps appending same-content
+  frames, each retry fuses a progressively larger set — SR improves the longer a
+  rock is held.
+- Buffer is cleared wherever the stability tracker resets (window None, hwnd
+  change, (re)start).
+
+**Why ECC-aligned mean over median / naive mean.** Median denoises but discards
+the sub-pixel sample diversity that actually reconstructs resolution; naive mean
+without registration blurs if frames drift. ECC translation is the cheapest
+registration that captures the dominant jitter (sub-pixel shift) and is robust —
+it degrades to an un-aligned average when it can't converge.
+
+**Dependency note.** `cv2` and `numpy` are imported lazily inside `fuse_frames`,
+so module import stays light and a missing OpenCV degrades to a plain upscale
+rather than crashing. OpenCV remains bundled in the frozen build because EasyOCR
+imports it at module top (verified), so PyInstaller still collects it even
+though `scanner.py` no longer imports `cv2` directly (v6.2.3).
+
+**Files touched.** `live_capture.py` (`fuse_frames`, ring buffer, fusion wiring,
+buffer-clear on reset), `version_checker.py` (6.2.3 → 6.2.4),
+`tests/test_live_capture_fusion.py` (new, 7 tests).
+
+**Tests.** 60 pass (was 53; +7 fusion). The denoising test asserts the fused
+output is measurably closer to ground truth than a single noisy frame; existing
+loop tests pass unchanged through the new fusion path.
+
+**Still environmental (now mitigated, not eliminated).** Fusion adds real signal
+but cannot fully substitute for source resolution. Raising SC's render/output
+resolution (e.g. Nvidia DSR/DLDSR, then set Windows to that resolution so WGC
+captures the larger HUD) remains the biggest single accuracy lever and stacks
+with fusion. Worth measuring crop size before/after.
+
+---
+
+### 2026-06-02 — v6.2.3: Recover misread signatures, drop wrong-polarity OCR filter
+
+Branch `feat/wgc-capture`. Addresses "the OCR is not doing good" — live mode
+captures a steady rock but rarely locks it. Diagnosed from the user's
+`dist/.../debug` dump (76 crops + summaries) plus replaying those crops through
+the real pipeline.
+
+**Root cause.** The signature crop is tiny (~40x27 px, ~20 px digit height).
+At that scale EasyOCR confuses glyphs (6/8/9) and reads a *steady* on-screen
+number differently every frame: 16,960 → 18,880 / 18,960 / 18,680; 25,620 →
+25,620 / 25,820 / 29,620. The strict "exact-multiple" validation correctly
+*rejects* the wrong reads, so the failure is **missed locks**, not false ones.
+Cross-referencing the debug reads against the DB: 11,565 (Titanium ×3) read
+perfectly, but 16,960 (Copper ×4) was misread on **every** captured frame and
+never locked.
+
+Two compounding bugs made it worse:
+1. `_remove_small_components` (the "punctuation filter") used
+   `THRESH_BINARY_INV` + Otsu, which assumes *dark text on light background*.
+   The SC HUD is *bright text on dark background*, so the threshold treats the
+   background as foreground; the step did nothing useful and measurably
+   *suppressed* recoverable reads (e.g. the one frame that would have yielded
+   16,960). Removed entirely. Separator misreads are handled downstream in
+   `_extract_signatures` anyway. `cv2` import and three dead
+   `*_COMPONENT_AREA*` constants dropped with it.
+2. No correction for *substitution* errors. The existing
+   `_try_correct_signature` only removes a phantom digit (comma/period read as
+   a digit) — it can't fix 16,960 read as 18,960.
+
+**Fix.**
+- New `_try_substitution_correction(value)` in `scanner.py`: tries every single
+  swap of a digit for one of its OCR look-alikes (`_OCR_CONFUSIONS`, e.g.
+  6↔8, 8↔9, 0↔8) and keeps only results that are valid exact multiples. Returns
+  a correction **only when exactly one** valid signature results — an ambiguous
+  misread (29,620 → 25,620 / 29,600 / 29,680) is refused, never guessed.
+  Wired into `_extract_signatures` as a fallback after phantom-digit correction.
+- Dropped the component filter from `_enhance_for_ocr` (upscale-only now).
+
+**Why not temporal vote-agreement.** Considered requiring a signature to be
+read in ≥2 frames before emitting. Rejected: even *with* correction, the
+hardest case (16,960) reads correctly on only ~1 in 6 frames, and the existing
+`_stable_digest` + `empty_rearm` loop *already* re-OCRs a fresh frame every few
+ticks while a rock is held, so it samples many frames and locks on the good
+one. A ≥2 agreement rule would make exactly that hard case *harder* to lock.
+The uniqueness gate on corrections already prevents false locks, so a single
+validated read is the right trade.
+
+**Why constrained, not free, substitution.** Unbounded digit swaps either
+can't reach the truth (18,880 → 16,960 is 3 swaps) or map ambiguously to
+several valid signatures. Restricting to OCR look-alikes *and* requiring a
+unique valid result keeps it safe; pairs naturally with the re-OCR loop.
+
+**Validation.** Replayed all 76 saved crops through the real `scan_pil_image`:
+every distinct real signature now locks at least once — 11565 (×9 frames),
+25620 (×6), 17080 (×1), 6740 (×1), and **16960 (×1, was 0)**. The 58
+blank/transition crops correctly produce no lock.
+
+**Files touched.** `scanner.py` (`_OCR_CONFUSIONS` map, `_try_substitution_correction`,
+`_extract_signatures` wiring, slimmed `_enhance_for_ocr`, removed
+`_remove_small_components` + `cv2` import + dead constants),
+`version_checker.py` (6.2.2 → 6.2.3), `tests/test_scanner_correction.py` (new,
+6 tests).
+
+**Tests.** 53 pass (was 47; +6 correction tests). No existing test depended on
+the removed filter.
+
+**Not fixed (environmental).** 16,960 is only readable on a minority of frames
+because the source is ~20 px tall. The durable cure is more source pixels —
+raise SC's in-game HUD/UI scale or render resolution so the signature renders
+larger. Worth measuring before/after.
+
+---
+
+### 2026-05-29 — v6.2.2: Live-mode stability tracker tolerant of HUD render jitter
+
+Branch `feat/wgc-capture`. Fixes live mode hanging at "Awaiting Signal"
+indefinitely while SC is in the foreground actively rendering the HUD, with
+no debug PNGs ever written.
+
+**Root cause.** `live_capture.tick()` hashed the raw cropped BGRA bytes with
+`hashlib.blake2b` to detect when the captured ROI's content stabilized.
+That's pixel-exact: any byte difference between two frames produced a
+completely different digest. When SC is alt-tabbed (background), its swap
+chain pauses and frames are byte-identical → the tracker reached
+`stable_change` after 3 ticks and the scanner ran (this is how earlier debug
+PNGs got produced — from stale background frames). When SC is foreground
+actively rendering, anti-aliasing on the HUD digits, the breathing camera
+animation, and the signature card's icon pulse cause every frame's BGRA
+bytes to differ even when the displayed signature value is visually steady.
+`StabilityTracker._seen_count` reset to 1 every tick → never reached the
+required 3 identical frames → scanner never invoked → no detection, no debug
+output. Verified by lowering probe rate to 5 Hz (200 ms between samples) and
+still seeing no stability — the variation isn't transient flicker, it's
+constant.
+
+**Fix.** New module-level helper `_stable_digest(bgra_bytes, w, h)` in
+`live_capture.py`. Pipeline: PIL decode → grayscale → resize to 32x16
+bilinear → quantize each pixel to 4 bits (16 brightness levels). Then the
+existing `hashlib.blake2b` runs over the quantized bytes. The downscale
+absorbs subpixel jitter; the quantization absorbs 1-step antialiasing
+brightness changes; the small fixed size keeps the hash input compact (512
+bytes) so it's cheap. The StabilityTracker itself is untouched — it still
+compares digests by exact equality, but the digests are now stable across
+the kind of minor variation a live game window produces.
+
+**Why not dHash / SSIM / lowering stable_frames.** dHash + Hamming distance
+would have required changing the tracker's exact-equality semantics — larger
+blast radius. Lowering `stable_frames` to 1 would fire on every transient
+frame change and re-OCR continuously. The downscale+quantize approach keeps
+tracker semantics identical and is a single-file change.
+
+**Files touched.** `live_capture.py` (helper + one-line swap in `tick()`),
+`version_checker.py` (CURRENT_VERSION 6.2.1 → 6.2.2).
+
+**Tests.** `tests/test_live_capture_stability.py` exercises StabilityTracker
+directly with arbitrary byte tokens — unaffected. `tests/test_live_capture_loop.py`
+pushes uniform-byte synthetic frames (`b"\x00" * N`, `b"\xAA" * N`); uniform
+input produces uniform downscaled grayscale → uniform quantized output →
+stable digest. All loop tests pass under the new digest without change.
+
+---
+
+### 2026-05-29 — v6.2.1: Overlay popup no longer steals focus from SC
+
+Branch `feat/wgc-capture`. Fixes a long-standing focus-theft bug that became
+visible only after the WGC migration: every detection popup yanked
+keyboard/mouse focus out of Star Citizen, dropping the player out of the game
+window mid-mining.
+
+**Root cause.** `bridge.py:_show_overlay` called `self._overlay_window.show()`
+on every detection. The overlay was created with `on_top=True`, but
+pywebview's `.show()` on WebView2 performs an **activating** `SW_SHOW`, which
+both raises the window and gives it foreground/keyboard focus. The same call
+was happening in folder mode but went unnoticed there — folder-mode users are
+typically alt-tabbed out of SC (loading screenshots, viewing the scanner) when
+popups fire, so the focus steal was invisible. Live mode probes SC while the
+player is actively in-game, making the steal jarring.
+
+**Fix.** New `_show_overlay_no_activate()` helper resolves the overlay HWND via
+`FindWindowW` and calls `ShowWindow(hwnd, SW_SHOWNOACTIVATE)` plus
+`SetWindowPos(hwnd, HWND_TOPMOST, …, SWP_NOACTIVATE | SWP_SHOWWINDOW)`. The
+overlay still appears topmost (because `on_top=True` keeps it in the
+always-on-top Z-order group), but foreground/focus stays with whatever window
+currently owns it — SC keeps the game running, the player keeps WASD and mouse
+look. Detection-path only; `enter_overlay_placement_mode` still uses
+pywebview's activating `.show()` because the user is intentionally interacting
+with the overlay there. Fallback to `.show()` if `FindWindowW` returns 0
+(e.g., if the overlay title ever drifts from the constant).
+
+**Files touched.** `bridge.py` (imports, `_OVERLAY_TITLE` const, helper,
+`_show_overlay` swap), `version_checker.py` (CURRENT_VERSION 6.0.0 → 6.2.1 —
+catches up to 6.2.0 too, which had been documented in DEVLOG but never
+reflected in the constant).
+
+---
+
+### 2026-05-27 — v6.2.0: WGC capture (replaces mss desktop-scrape)
+
+Branch `feat/wgc-capture`. Replaces `mss`-based desktop screen-scraping with Windows.Graphics.Capture via the `windows-capture` 2.0.0 Python library. WGC captures SC's swap-chain content directly regardless of Z-order, fixing the field bug where live mode returned the topmost window's pixels (Windows Settings UI, Explorer thumbnails) instead of SC's HUD.
+
+**1. Capture backend.** New `wgc_capture.py` wraps a `windows-capture` session. Runs WGC on the library's callback thread; pushes the most recent frame into a single-slot `(bytes, w, h)` storage under a lock. The existing `LiveCapture` tick loop reads that slot at `live_probe_hz`. Drop-newest semantics — frames between ticks are discarded naturally.
+
+**2. CPU-side ROI cropping.** New `_crop_bgra` pure helper crops a full-window BGRA buffer to the calibrated window-relative region. Cropping happens after readback for simplicity; ~20 KB of bytes per OCR-eligible frame.
+
+**3. Occlusion check removed.** PR #5's `WindowFromPoint` check + `idle_occluded` Status are deleted. WGC makes them obsolete; they were producing false negatives from transparent always-on-top overlays (NVIDIA, Steam, Discord, our own overlay window).
+
+**4. Calibration also moved to WGC.** `bridge.calibrate_region_live` replaces its `mss.mss().grab(client_rect)` one-shot with a short-lived WGC session that waits for the first frame (5-second timeout). Works under occlusion the same way the live loop does.
+
+**Files added:**
+- `wgc_capture.py` — `WGCSession`, `WGCError`, factory.
+- `tests/test_wgc_session.py` — 5 unit tests over a fake `windows_capture.WindowsCapture`.
+- `tests/test_wgc_crop.py` — 4 unit tests for `_crop_bgra`.
+
+**Files modified:**
+- `live_capture.py` — `mss_factory` / `window_from_point` → `wgc_session_factory`; tick rewrite; `idle_occluded` removed from `Status`.
+- `tests/test_live_capture_loop.py` — `FakeMss` → `FakeWGCSession`; 2 occlusion tests deleted; 3 new tests (warming up, warming-up-errors, ROI-clamp-degenerate).
+- `bridge.py` — `calibrate_region_live` rewrite.
+- `ui/main/scanner-panel.jsx` — drop "SC OCCLUDED — FOCUS GAME" label.
+- `ui/main/index.html` — cache-buster `v=44 → v=45`.
+- `requirements.txt` — `-mss` `+windows-capture>=2.0.0`.
+- `SC_Signature_Scanner.spec` — hidden imports + collect_submodules + collect_dynamic_libs for windows-capture and winrt.
+
+**Test suite:** 47 pytest cases (37 v6.1.0 baseline − 2 deleted occlusion tests + 5 WGC session + 4 crop + 3 new live-capture cases). Manual verification per `docs/manual-test-live-capture.md`.
+
+**Out of scope (future):**
+- GPU-side ROI cropping via D3D11 `CopySubresourceRegion` (perf optimization if CPU usage is high).
+- mss-as-fallback if WGC fails (not currently observed).
+- Per-window cursor inclusion toggle.
+
+**Version:** `6.1.0` → `6.2.0`.
+
+---
 
 ### 2026-05-27 — v6.1.0: Live window capture
 

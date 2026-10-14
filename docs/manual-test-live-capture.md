@@ -25,28 +25,33 @@ REGION modules in `ui/main/app.jsx` / `ui/main/scanner-panel.jsx` /
 - [ ] **Look-away re-arm.** Look away (signature gone) → look back at the
   same rock → overlay fires again. Both detections in the log.
 
+- [ ] **SC behind opaque windows.** Open Windows Settings (or any other
+  opaque window) over the SC HUD area. → Detections fire normally. (WGC
+  captures SC's swap-chain content regardless of Z-order.)
+
+- [ ] **Transparent overlay active.** Enable NVIDIA / Steam / Discord
+  overlay. → Detections fire normally.
+
+- [ ] **Live mode while scanner is foreground.** Click into the Scanner UI
+  itself while LIVE is engaged. → Detections continue to fire.
+
 - [ ] **Window-move robustness.** Drag the SC window across the desktop
-  mid-session → no spurious detection during the move; first new stable
-  signature after the move fires correctly.
+  mid-session. → First new stable signature after the move fires correctly.
 
 - [ ] **Minimize idle.** Minimize SC → status pill flips to
-  "IDLE (MINIMIZED)"; CPU usage drops (verify in Task Manager). Restore →
-  capture resumes.
+  "IDLE (MINIMIZED)"; CPU usage drops. Restore → capture resumes.
 
-- [ ] **Region out-of-bounds.** Resize SC so the window is smaller than the
-  calibrated region's bottom-right corner → status reads "ERROR" with an
-  "out of bounds — recalibrate" message. Re-enlarge → capture resumes
-  without re-engaging.
+- [ ] **Region out-of-bounds.** Resize SC smaller than the calibrated
+  region. → Status reads "ERROR" with an "out of bounds" message.
+  Re-enlarging resumes without re-engaging.
 
-- [ ] **Mid-session mode switch.** While LIVE is running, switch the toggle
-  to FOLDER → live thread stops cleanly (verify in logs), folder watcher
-  starts on the configured screenshot folder.
+- [ ] **Mid-session mode switch.** While LIVE is running, switch the
+  toggle to FOLDER. → Live thread stops cleanly, folder watcher starts.
 
-- [ ] **SC closes mid-session.** Close SC → status returns to "WAITING FOR
-  SC"; no errors logged. Relaunching SC resumes capture.
+- [ ] **SC closes mid-session.** Close SC. → Status returns to "WAITING
+  FOR SC"; no errors logged. Relaunching SC resumes capture.
 
-## What's NOT tested by this checklist
-
-- Multi-monitor with negative-origin monitors (covered by unit tests).
-- Exclusive-fullscreen SC — explicitly unsupported; same constraint as the
-  existing always-on-top overlay.
+- [ ] **WGC unsupported (rare).** On a system without WGC support (very
+  old Windows 10 build, exotic graphics driver), ENGAGE in LIVE mode
+  surfaces a clear error: "Windows Graphics Capture is not supported on
+  this system."

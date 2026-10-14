@@ -12,6 +12,7 @@ and placement-mode toggles via `window.onPlacementMode(...)`.
 
 from __future__ import annotations
 
+import ctypes
 import json
 import re
 import threading
@@ -25,8 +26,18 @@ from config import Config
 from monitor import ScreenshotMonitor
 from live_capture import LiveCapture
 from window_finder import find_sc_window
-import mss
 import region_selector
+
+
+# Win32 constants for showing the overlay without activating it (so SC keeps
+# keyboard/mouse focus when a detection popup appears). pywebview's .show()
+# does an activating SW_SHOW on WebView2, which yanks focus out of the game.
+_SW_SHOWNOACTIVATE = 4
+_HWND_TOPMOST = -1
+_SWP_NOMOVE = 0x0002
+_SWP_NOSIZE = 0x0001
+_SWP_NOACTIVATE = 0x0010
+_SWP_SHOWWINDOW = 0x0040
 
 
 class Bridge:
@@ -44,6 +55,10 @@ class Bridge:
     _OVERLAY_BASE_W = 272
     _OVERLAY_BASE_H = 152
     _OVERLAY_PLACEMENT_BASE_H = 200
+
+    # Must match app_webview.py's overlay create_window(title=...). Used to
+    # resolve the overlay HWND for no-activate Win32 ShowWindow calls.
+    _OVERLAY_TITLE = "SC Signature Scanner — Overlay"
 
     def __init__(self, scanner: Any, config: Config) -> None:
         self.scanner = scanner
@@ -125,20 +140,40 @@ class Bridge:
         return {"ok": True}
 
     def calibrate_region_live(self) -> dict[str, Any]:
-        """One-shot: grab the SC client area, open the region picker on that
-        image, persist the rect window-relative."""
+        """One-shot: start a brief WGC session against the SC window, capture
+        the first delivered frame, hand it to the region picker, persist the
+        rect as window-relative."""
         info = find_sc_window()
         if info is None:
             return {"ok": False, "error": "Star Citizen not running"}
 
-        x, y, w, h = info.client_rect
-        with mss.mss() as sct:
-            shot = sct.grab({"left": x, "top": y, "width": w, "height": h})
+        import threading
+        from wgc_capture import WGCSession, WGCError
 
+        frame_ready = threading.Event()
+        captured: list[tuple[bytes, int, int]] = []
+
+        def cb(raw: bytes, w: int, h: int) -> None:
+            if captured:
+                return
+            captured.append((raw, w, h))
+            frame_ready.set()
+
+        session = WGCSession(info.hwnd, on_frame=cb)
+        try:
+            session.start()
+        except WGCError as e:
+            return {"ok": False, "error": str(e)}
+
+        ok = frame_ready.wait(timeout=5.0)
+        session.stop()
+
+        if not ok or not captured:
+            return {"ok": False, "error": "WGC didn't deliver a frame in 5 seconds"}
+
+        raw, w, h = captured[0]
         from PIL import Image as _Image
-        img = _Image.frombytes(
-            "RGB", (shot.width, shot.height), bytes(shot.raw), "raw", "BGRX"
-        )
+        img = _Image.frombytes("RGB", (w, h), raw, "raw", "BGRX")
 
         import region_selector
         selector = region_selector.RegionSelector(parent=None)
@@ -228,6 +263,11 @@ class Bridge:
         # Changes to these take effect on the next ENGAGE, not mid-session.
         "live_probe_hz": 30,
         "live_log_no_signature": False,
+        # Config-file only (no UI control): seconds between live OCR runs,
+        # identical reads needed before a popup, and minimum OCR confidence.
+        "live_ocr_interval_s": 0.4,
+        "live_confirm_reads": 1,
+        "live_min_confidence": 0.45,
     }
 
     def get_settings(self) -> dict[str, Any]:
@@ -403,10 +443,19 @@ class Bridge:
             "live_probe_hz", self._SETTINGS_DEFAULTS["live_probe_hz"]))))
         emit_empty = bool(cfg.get(
             "live_log_no_signature", self._SETTINGS_DEFAULTS["live_log_no_signature"]))
+        ocr_interval_s = max(0.1, min(5.0, float(cfg.get(
+            "live_ocr_interval_s", self._SETTINGS_DEFAULTS["live_ocr_interval_s"]))))
+        confirm_reads = max(1, min(5, int(cfg.get(
+            "live_confirm_reads", self._SETTINGS_DEFAULTS["live_confirm_reads"]))))
+        min_confidence = max(0.0, min(1.0, float(cfg.get(
+            "live_min_confidence", self._SETTINGS_DEFAULTS["live_min_confidence"]))))
         self.live_capture = LiveCapture(
             scanner=self.scanner,
             emit=self._on_live_result,
             probe_hz=probe_hz,
+            ocr_interval_s=ocr_interval_s,
+            confirm_reads=confirm_reads,
+            min_confidence=min_confidence,
             emit_empty=emit_empty,
         )
         return self.live_capture.start()
@@ -925,8 +974,13 @@ class Bridge:
         enriched = {**payload, "duration": duration, "scale": scale}
         self._overlay_last_payload = enriched
         self._push_to_overlay("onOverlayDetection", enriched)
+        # Detection popups MUST NOT steal focus from SC — using a Win32
+        # no-activate show keeps the game's keyboard/mouse focus intact.
+        # Placement mode keeps the activating .show() because the user is
+        # interacting with the scanner UI, not SC, when they enter it.
         try:
-            self._overlay_window.show()
+            if not self._show_overlay_no_activate():
+                self._overlay_window.show()  # fallback if HWND unresolved
             self._overlay_visible = True
         except Exception as e:  # noqa: BLE001
             print(f"[bridge] overlay show failed: {e}")
@@ -939,6 +993,29 @@ class Bridge:
             0.5,
             min(2.0, float(cfg.get("popup_scale", self._SETTINGS_DEFAULTS["popup_scale"]))),
         )
+
+    def _show_overlay_no_activate(self) -> bool:
+        """Show the overlay topmost without stealing focus from the foreground
+        window (typically Star Citizen). pywebview's `.show()` activates the
+        window on WebView2; this calls `ShowWindow(SW_SHOWNOACTIVATE)` plus
+        `SetWindowPos(HWND_TOPMOST, SWP_NOACTIVATE)` instead. Returns True if
+        SetWindowPos succeeded (ShowWindow's return is the previous visibility,
+        not success), so the caller falls back to `.show()` otherwise.
+        """
+        hwnd = ctypes.windll.user32.FindWindowW(None, self._OVERLAY_TITLE)
+        if not hwnd:
+            return False
+        ctypes.windll.user32.ShowWindow(hwnd, _SW_SHOWNOACTIVATE)
+        positioned = ctypes.windll.user32.SetWindowPos(
+            hwnd,
+            _HWND_TOPMOST,
+            0,
+            0,
+            0,
+            0,
+            _SWP_NOMOVE | _SWP_NOSIZE | _SWP_NOACTIVATE | _SWP_SHOWWINDOW,
+        )
+        return bool(positioned)
 
     def _resize_overlay(self, scale: float, with_toolbar: bool = False) -> None:
         if self._overlay_window is None:
