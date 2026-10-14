@@ -1,0 +1,126 @@
+# Builds the Windows release zip with build.py (PyInstaller + SC_Signature_Scanner.spec)
+# and publishes a GitHub Release when a merge to master carries a new version.
+# Author: Mallachi
+name: Build Windows exe
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - master
+  # Catch packaging breakage early when the build inputs change.
+  pull_request:
+    paths:
+      - ".github/workflows/build-windows.yml"
+      - "SC_Signature_Scanner.spec"
+      - "build.py"
+      - "release_notes.py"
+      - "requirements.txt"
+
+# Only the publish job gets write access.
+permissions:
+  contents: read
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+      release: ${{ steps.release.outputs.release }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Read app version
+        id: version
+        run: |
+          version=$(python3 -c "import version_checker; print(version_checker.CURRENT_VERSION)")
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "App version: $version"
+
+      # A release happens once per version: merges that don't bump
+      # CURRENT_VERSION find the release (with its zip) already there and
+      # skip the build. A release missing its zip is rebuilt and re-uploaded.
+      - name: Decide whether to release
+        id: release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          zip="SC_Signature_Scanner_v${VERSION}.zip"
+          if [ "$GITHUB_EVENT_NAME" != "push" ]; then
+            echo "release=false" >> "$GITHUB_OUTPUT"
+          elif gh release view "v${VERSION}" --repo "$GITHUB_REPOSITORY" --json assets --jq '.assets[].name' 2>/dev/null | grep -qxF "$zip"; then
+            echo "Release v${VERSION} already has ${zip}; nothing to release."
+            echo "release=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "release=true" >> "$GITHUB_OUTPUT"
+          fi
+
+  build:
+    needs: check
+    if: github.event_name != 'push' || needs.check.outputs.release == 'true'
+    runs-on: windows-latest
+    env:
+      VERSION: ${{ needs.check.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+          cache-dependency-path: requirements.txt
+
+      # CPU-only torch keeps the bundle far smaller than the default CUDA build.
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install torch torchvision --index-url https://download.pytorch.org/whl/cpu
+          python -m pip install -r requirements.txt pyinstaller
+
+      - name: Build
+        run: python build.py
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: SC_Signature_Scanner_v${{ env.VERSION }}
+          path: dist/SC_Signature_Scanner_v${{ env.VERSION }}.zip
+          if-no-files-found: error
+
+  publish:
+    needs: [check, build]
+    if: needs.check.outputs.release == 'true'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    # Runs for the same version (re-pushes without a bump) queue rather than
+    # race; different versions never share a group, so none is dropped.
+    concurrency:
+      group: release-v${{ needs.check.outputs.version }}
+      cancel-in-progress: false
+    env:
+      VERSION: ${{ needs.check.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Write release notes
+        run: |
+          python3 release_notes.py "$VERSION" > release_notes.md
+          cat release_notes.md
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: SC_Signature_Scanner_v${{ env.VERSION }}
+
+      # Notes = this version's DEVLOG entry, followed by GitHub's list of
+      # PRs merged since the previous release.
+      - name: Publish GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v${{ env.VERSION }}
+          target_commitish: ${{ github.sha }}
+          name: v${{ env.VERSION }}
+          body_path: release_notes.md
+          generate_release_notes: true
+          files: SC_Signature_Scanner_v${{ env.VERSION }}.zip

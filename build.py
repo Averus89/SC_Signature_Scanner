@@ -251,8 +251,8 @@ def main():
     print("  Users extract the zip and run SC_Signature_Scanner.exe")
     print()
 
-    # Open dist folder on Windows
-    if sys.platform == "win32":
+    # Open dist folder on Windows (not on CI runners, where nobody is watching)
+    if sys.platform == "win32" and not os.environ.get("CI"):
         os.startfile(project_dir / "dist")
 
 
