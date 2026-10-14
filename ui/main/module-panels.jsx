@@ -352,7 +352,7 @@ function AboutPanel({ version, versionDev, ocrEngine, bridgeReady }) {
         </div>
 
         <div className="about-byline">
-          Made in 2026 by <strong>Mallachi</strong>, ..All solutions start with a problem worth solving..
+          Made in 2026 by <strong>Mallachi</strong>, ..All solutions start with a problem worth solving.. · Maintained by <strong>Averus89</strong>
         </div>
 
         <div className="about-memorial">

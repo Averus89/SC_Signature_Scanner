@@ -232,6 +232,10 @@ def main():
                 # Archive path: SC_Signature_Scanner/<relative path inside dist_dir>
                 arcname = Path("SC_Signature_Scanner") / file.relative_to(dist_dir)
                 zf.write(file, arcname)
+        # MIT and the bundled libraries' licenses ask for their notices to ship
+        # with the binary, so they sit next to the exe.
+        for notice in ("LICENSE", "THIRD_PARTY_NOTICES.md"):
+            zf.write(project_dir / notice, Path("SC_Signature_Scanner") / notice)
 
     zip_size_mb = zip_path.stat().st_size / (1024 * 1024)
     print(f"  ✓ {zip_name} ({zip_size_mb:.1f} MB)")

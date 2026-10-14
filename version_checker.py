@@ -11,10 +11,10 @@ import json
 from typing import Tuple, Optional
 
 # Current version - update this with each release
-CURRENT_VERSION = "6.2.11"
+CURRENT_VERSION = "6.2.12"
 
-# GitHub repository info - UPDATE THESE when repo is created
-GITHUB_OWNER = "Diftic"
+# GitHub repository the update checker and release links point at
+GITHUB_OWNER = "Averus89"
 GITHUB_REPO = "SC_Signature_Scanner"
 
 # GitHub API URL for latest release
