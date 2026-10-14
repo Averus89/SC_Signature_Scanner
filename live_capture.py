@@ -1,9 +1,9 @@
 """Live signature scanning from the running Star Citizen window.
 
-Three units, each in this file:
-  - StabilityTracker — pure-logic gate (this task)
-  - compute_abs_capture_rect — pure geometry helper (next task)
-  - LiveCapture — capture loop / thread / orchestration (next task)
+Units in this file:
+  - compute_abs_capture_rect — pure geometry helper
+  - fuse_frames — multi-frame super-resolution of same-content crops
+  - LiveCapture — capture loop / thread / orchestration (timed OCR)
 """
 from __future__ import annotations
 
@@ -18,81 +18,17 @@ from PIL import Image
 from wgc_capture import WGCError
 
 
-Decision = Literal["no_change", "ongoing", "stable_change"]
-
 # Live capture thresholds.
 # Number of ticks with no frame before flipping to error status —
 # ~3 sec at the default 30 Hz probe rate.
 _NO_FRAME_ERROR_THRESHOLD = 90
 
-
-class StabilityTracker:
-    """Decide when a captured region's content has stabilized into a new value.
-
-    The capture loop calls `observe(digest)` once per probe tick. The tracker
-    returns:
-        - "ongoing" — the hash just changed or hasn't repeated enough times yet.
-        - "stable_change" — the hash has repeated `stable_frames` times AND
-          differs from the last digest that produced an emission. The caller
-          should run OCR.
-        - "no_change" — the hash is stable but matches the last emitted one
-          (we've already reported this content; don't re-fire).
-
-    After running OCR, the caller decides whether to call `empty_rearm()`
-    (OCR found no signatures — clear the emitted-hash memo so the same hash
-    can re-fire later) or do nothing (OCR succeeded — the tracker has already
-    recorded the emitted hash).
-    """
-
-    def __init__(self, stable_frames: int = 3) -> None:
-        if stable_frames < 1:
-            raise ValueError("stable_frames must be >= 1")
-        self.stable_frames = stable_frames
-        self._last_seen: Optional[bytes] = None
-        self._seen_count = 0
-        self._last_emitted: Optional[bytes] = None
-
-    def observe(self, digest: bytes) -> Decision:
-        """Observe a new digest and return the stability decision.
-
-        Args:
-            digest: The content hash (e.g., MD5 of the captured region).
-
-        Returns:
-            - "ongoing" if the hash is new or hasn't stabilized yet.
-            - "stable_change" if the hash has stabilized and differs from
-              the last emitted hash.
-            - "no_change" if the hash is stable and matches the last emitted one.
-        """
-        if digest == self._last_seen:
-            self._seen_count += 1
-        else:
-            self._last_seen = digest
-            self._seen_count = 1
-
-        if self._seen_count == self.stable_frames:
-            if digest != self._last_emitted:
-                self._last_emitted = digest
-                return "stable_change"
-            return "no_change"
-
-        if self._seen_count > self.stable_frames:
-            # Already stable and emitted (or no-change'd) — keep silent.
-            return "no_change"
-
-        return "ongoing"
-
-    def empty_rearm(self) -> None:
-        """Called after OCR returned no signatures; allow the same hash to fire next time."""
-        self._last_emitted = None
-        self._seen_count = 0
-        self._last_seen = None
-
-    def reset(self) -> None:
-        """Drop all state — used when the window moves and the capture rect changes."""
-        self._last_seen = None
-        self._seen_count = 0
-        self._last_emitted = None
+# OCR runs on a fixed interval rather than when the ROI "stabilizes". The
+# signature label is drawn over moving space and rocks, so a whole-ROI digest
+# almost never repeats while the player flies — measured live, a 3-frame
+# stability gate fired 0 times in 443 samples, and only ever fired on still,
+# empty space. ~40 ms of OCR every 0.4 s is ~10% of one core.
+DEFAULT_OCR_INTERVAL_S = 0.4
 
 
 MIN_ROI_W = 10
@@ -157,9 +93,9 @@ def _stable_digest(bgra_bytes: bytes, w: int, h: int) -> bytes:
     Live SC rendering produces minor per-frame variation (anti-aliasing,
     breathing animations, distance counters) even on visually-static HUD
     content. Hashing the raw BGRA bytes never produces equal digests across
-    frames, so the stability tracker never fires. Downscaling to 32x16
-    grayscale + 4-bit quantization absorbs that noise while still yielding
-    distinct hashes for actually-different signature values.
+    frames, so same-content crops could never be grouped for fusion.
+    Downscaling to 32x16 grayscale + 4-bit quantization absorbs that noise
+    while still yielding distinct hashes for actually-different content.
     """
     img = Image.frombytes("RGB", (w, h), bgra_bytes, "raw", "BGRX")
     small = img.convert("L").resize((32, 16), Image.BILINEAR)
@@ -270,9 +206,9 @@ def _default_wgc_session_factory(hwnd, on_frame):
 
 
 class LiveCapture:
-    """Background capture loop. Probes the SC window at probe_hz and emits
-    scan results via the supplied `emit` callback when content changes and
-    stabilizes."""
+    """Background capture loop. Probes the SC window at probe_hz, OCRs the
+    ROI every `ocr_interval_s`, and emits scan results via the supplied
+    `emit` callback when the read signature changes."""
 
     def __init__(
         self,
@@ -283,8 +219,9 @@ class LiveCapture:
         load_window_region: Callable[[], Any] = _default_load_window_region,
         wgc_session_factory: Callable[[int, Callable[[bytes, int, int], None]], Any] = _default_wgc_session_factory,
         probe_hz: int = 30,
-        stable_frames: int = 3,
+        ocr_interval_s: float = DEFAULT_OCR_INTERVAL_S,
         emit_empty: bool = False,
+        clock: Callable[[], float] = time.monotonic,
     ) -> None:
         self.scanner = scanner
         self.emit = emit
@@ -292,10 +229,15 @@ class LiveCapture:
         self._load_window_region = load_window_region
         self._wgc_session_factory = wgc_session_factory
         self._emit_empty = emit_empty
+        self._clock = clock
 
         self._tick_period = 1.0 / probe_hz
         self._idle_period = 0.5  # waiting / idle_minimized
-        self._tracker = StabilityTracker(stable_frames=stable_frames)
+        self._ocr_interval_s = ocr_interval_s
+        self._last_ocr_at: Optional[float] = None
+        # Last signature emitted; cleared by an empty read so the same rock
+        # fires again after the player looks away and back.
+        self._last_emitted_signature: Optional[Any] = None
         self._status: Status = "stopped"
 
         self._region_window_rel: Optional[tuple[int, int, int, int]] = None
@@ -341,10 +283,16 @@ class LiveCapture:
                 "error": "Live region not calibrated — use REGION → Calibrate from live frame.",
             }
         self._region_window_rel = region
-        self._tracker.reset()
-        self._frame_buffer.clear()
+        self._reset_detection()
         self._status = "waiting"
         return {"ok": True}
+
+    def _reset_detection(self) -> None:
+        """Forget buffered crops, the OCR timer and the last emitted value —
+        used whenever the capture target changes."""
+        self._frame_buffer.clear()
+        self._last_ocr_at = None
+        self._last_emitted_signature = None
 
     def stop(self) -> None:
         self._stop_event.set()
@@ -407,8 +355,7 @@ class LiveCapture:
 
         if info is None:
             self._stop_wgc()
-            self._tracker.reset()
-            self._frame_buffer.clear()
+            self._reset_detection()
             self._status = "waiting"
             return self._idle_period
 
@@ -425,8 +372,7 @@ class LiveCapture:
                 if self._emit_empty:
                     self.emit({"error": f"WGC session failed: {e}"}, source="live")
                 return self._idle_period
-            self._tracker.reset()
-            self._frame_buffer.clear()
+            self._reset_detection()
 
         if self._wgc is None or not self._wgc.is_active:
             self._status = "error"
@@ -470,15 +416,16 @@ class LiveCapture:
 
         digest = _stable_digest(roi_bytes, roi_w, roi_h)
         self._frame_buffer.append((digest, roi_bytes, roi_w, roi_h))
-        decision = self._tracker.observe(digest)
         self._status = "running"
 
-        if decision != "stable_change":
+        now = self._clock()
+        if self._last_ocr_at is not None and now - self._last_ocr_at < self._ocr_interval_s:
             return self._tick_period
+        self._last_ocr_at = now
 
-        # Fuse every buffered frame of THIS stabilized content into one
-        # super-resolved image before OCR. Same digest == same displayed value
-        # but sub-pixel-distinct pixels — exactly what multi-frame SR needs.
+        # Fuse buffered frames of the same content into one super-resolved
+        # image before OCR. Same digest == same displayed value but sub-pixel-
+        # distinct pixels; while the view moves this is usually just one frame.
         same_content = [
             (buf, w, h) for (d, buf, w, h) in self._frame_buffer if d == digest
         ]
@@ -495,10 +442,14 @@ class LiveCapture:
             return self._tick_period
 
         if result is None or result.get("error") or not result.get("matches"):
-            self._tracker.empty_rearm()
+            self._last_emitted_signature = None
             if self._emit_empty:
                 self.emit(result or {"error": "No signature detected"}, source="live")
             return self._tick_period
 
+        signature = result.get("signature")
+        if signature == self._last_emitted_signature:
+            return self._tick_period
+        self._last_emitted_signature = signature
         self.emit(result, source="live")
         return self._tick_period

@@ -2,11 +2,15 @@
 
 ---
 
-## Active: v6.2.5 — OCR accuracy on top of WGC capture (branch `feat/wgc-ocr-combined`)
+## Active: v6.2.6 — Live detection that actually fires (branch `feat/timed-ocr`)
 - [x] Merged `feat/wgc-capture` (WGC replaces mss; app UI can no longer leak into live frames)
 - [x] Substitution correction + multi-frame fusion (v6.2.3/v6.2.4; upscale-only preprocessing)
 - [x] Primary signature by OCR confidence, not max()
-- [ ] Verify in-game on Windows (WGC calibration frame, OCR on bright backgrounds)
+- [x] Timed live OCR (every `live_ocr_interval_s`, default 0.4 s) replaces the stability gate
+- [x] Contrast normalization for labels over bright asteroids (no punctuation filter)
+- [ ] Verify in-game on Windows (detection rate while flying, CPU load, bright backgrounds)
+- [ ] Region picker: show box size/position while dragging (hard to hit an 85x40 box blind)
+- [ ] Re-collect a validation set of labelled crops (the v6.2.3 set of 76 is gone)
 - [ ] Fix live picker pre-drawing the screenshot-mode rect (`region_selector.py`, option C)
 
 ---

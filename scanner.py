@@ -43,6 +43,7 @@ MAX_SIGNATURE = 200_000
 
 # OCR image processing
 MIN_OCR_DIMENSION = 64       # upscale threshold (pixels)
+CONTRAST_PERCENTILES = (1, 99)  # ignore outlier pixels when stretching contrast
 
 # Signature matching
 MAX_CLUSTER_COUNT = 100      # sanity cap on rock count (value / base signature)
@@ -339,16 +340,17 @@ class SignatureScanner:
         otherwise-recoverable reads (e.g. 16,960). Separator misreads are
         handled downstream in _extract_signatures instead.
 
+        After upscaling, the crop is normalized to dark text on a light,
+        full-range background. A label drawn over a bright asteroid is
+        light-on-light-grey with only a few levels of contrast, which EasyOCR
+        misreads (e.g. 25,440 -> "3"); stretching restores the separation.
+
         Args:
             img: Cropped region containing signature
 
         Returns:
-            Numpy array (RGB) ready for EasyOCR
+            Grayscale uint8 numpy array (dark text on light) for EasyOCR
         """
-        # Ensure RGB
-        if img.mode != 'RGB':
-            img = img.convert('RGB')
-
         # Upscale small regions for better detection
         if img.width < MIN_OCR_DIMENSION or img.height < MIN_OCR_DIMENSION:
             scale = max(MIN_OCR_DIMENSION // min(img.width, img.height), 2)
@@ -357,7 +359,32 @@ class SignatureScanner:
                 Image.Resampling.LANCZOS
             )
 
-        return np.array(img)
+        return self._normalize_contrast(np.array(img.convert('L')))
+
+    @staticmethod
+    def _normalize_contrast(gray: np.ndarray) -> np.ndarray:
+        """Make text dark on light and stretch it to the full 0-255 range.
+
+        Text covers less of a signature crop than background does, so the
+        minority side of an Otsu split is taken to be the text.
+        """
+        hist = np.bincount(gray.ravel(), minlength=256).astype(np.float64)
+        levels = np.arange(256)
+        weight_lo = np.cumsum(hist)
+        weight_hi = weight_lo[-1] - weight_lo
+        sum_lo = np.cumsum(hist * levels)
+        mean_lo = sum_lo / np.maximum(weight_lo, 1)
+        mean_hi = (sum_lo[-1] - sum_lo) / np.maximum(weight_hi, 1)
+        threshold = int(np.argmax(weight_lo * weight_hi * (mean_lo - mean_hi) ** 2))
+
+        if np.count_nonzero(gray > threshold) < gray.size / 2:
+            gray = 255 - gray
+
+        lo, hi = np.percentile(gray, CONTRAST_PERCENTILES)
+        if hi <= lo:
+            return gray
+        stretched = (gray.astype(np.float32) - lo) * (255.0 / (hi - lo))
+        return np.clip(stretched, 0, 255).astype(np.uint8)
 
     def _load_database(self, db_path: Path) -> Dict[str, Any]:
         """Load signature database."""

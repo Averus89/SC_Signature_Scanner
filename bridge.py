@@ -263,6 +263,8 @@ class Bridge:
         # Changes to these take effect on the next ENGAGE, not mid-session.
         "live_probe_hz": 30,
         "live_log_no_signature": False,
+        # Config-file only (no UI control): seconds between live OCR runs.
+        "live_ocr_interval_s": 0.4,
     }
 
     def get_settings(self) -> dict[str, Any]:
@@ -438,10 +440,13 @@ class Bridge:
             "live_probe_hz", self._SETTINGS_DEFAULTS["live_probe_hz"]))))
         emit_empty = bool(cfg.get(
             "live_log_no_signature", self._SETTINGS_DEFAULTS["live_log_no_signature"]))
+        ocr_interval_s = max(0.1, min(5.0, float(cfg.get(
+            "live_ocr_interval_s", self._SETTINGS_DEFAULTS["live_ocr_interval_s"]))))
         self.live_capture = LiveCapture(
             scanner=self.scanner,
             emit=self._on_live_result,
             probe_hz=probe_hz,
+            ocr_interval_s=ocr_interval_s,
             emit_empty=emit_empty,
         )
         return self.live_capture.start()

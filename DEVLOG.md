@@ -49,6 +49,26 @@ The devlog shall always contain a clear "Current Status" or "Next Steps" section
 
 ## Changelog
 
+### 2026-10-14 — v6.2.6: Timed live OCR + contrast normalization
+
+Branch `feat/timed-ocr` (on top of `feat/wgc-ocr-combined`). Fixes "no detection" in live mode.
+
+**Root cause.** Live OCR only ran after the ROI's perceptual digest repeated for 3 consecutive ticks (`StabilityTracker`). The digest covers the whole ROI, including the space and asteroids behind the signature label, so while the player flies or turns it never repeats. Measured live: 0 stable events in 443 samples (15 s at 30 Hz). The gate only fired on still, empty space, which is why every debug crop showed stars. In a gameplay recording the label sat in the ROI for ~10 s (12:33:28–38) with zero OCR runs. Larger ROIs made it worse (more background).
+
+**Fix.**
+- `LiveCapture` OCRs the latest ROI every `ocr_interval_s` (config `live_ocr_interval_s`, default 0.4 s, clamped 0.1–5 s; no UI control) regardless of motion. OCR on a signature-sized crop is ~30–40 ms, so ~10% of one core.
+- Emits only when the signature differs from the last emitted one; an empty read clears that memo, so looking away and back fires again. Window/hwnd changes reset it.
+- Fusion is kept: buffered crops with the same digest are still fused. While the view moves that is usually one frame, so it degrades to a plain upscale.
+- `StabilityTracker` and its tests removed (no remaining users). An optional "skip OCR on empty crops" pre-check was considered and not added: a label over a bright rock has only ~20 grey levels of range, the same as empty space, so a brightness/contrast pre-check would skip exactly the hard case.
+
+**Contrast normalization.** `_enhance_for_ocr` now converts the upscaled crop to grayscale, flips light-on-dark to dark-on-light (Otsu minority = text) and applies a 1–99 percentile stretch. Pure numpy; still no punctuation/component filter (the v6.2.3 finding stands). On the 60 real crops available (today's debug output + live grabs) it fixed 2 misses (25,440 over a bright rock read as "3"; one 17,200 grab), regressed 0, and produced no false reads on 54 empty crops. The v6.2.3 set of 76 crops no longer exists, so a fresh labelled set is a TODO.
+
+**Region note.** The signature label renders next to the target marker and its width/position shifts by ~10–20 px between rocks; a 38×18 ROI clipped digits. The ROI was set to 85×40 at (2540,490)-(2625,530) on a 5120×1440 display.
+
+**Tests.** `tests/test_live_capture_loop.py` rewritten around a fake clock (fires on the interval while the image changes, throttles between intervals, no re-emit of the same value, re-emit after an empty read, reset on window change). New `tests/test_scanner_contrast.py`. `tests/test_live_capture_stability.py` removed.
+
+---
+
 ### 2026-10-14 — v6.2.5: Primary signature = most confident OCR read
 
 Branch `feat/wgc-ocr-combined` (WGC capture + v6.2.3/v6.2.4 OCR work + the OCR fix from `claude/project-thread-gtojxg`).

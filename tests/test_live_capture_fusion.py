@@ -119,14 +119,11 @@ def test_loop_feeds_a_fused_upscaled_image_to_the_scanner():
         load_window_region=lambda: (0, 0, 100, 30),
         wgc_session_factory=factory,
         probe_hz=30,
-        stable_frames=2,
     )
     live.start_for_tests()
     live.tick()                       # creates session, no frame yet
     sessions[1].push(frame, 100, 30)
-    live.tick()                       # ongoing
-    sessions[1].push(frame, 100, 30)
-    live.tick()                       # stable_change → fuse → scan
+    live.tick()                       # first frame → fuse → scan
 
     scanner.scan_pil_image.assert_called_once()
     passed = scanner.scan_pil_image.call_args.args[0]
