@@ -37,8 +37,13 @@ def extract_notes(devlog: str, version: str) -> str:
 def main() -> None:
     if len(sys.argv) != 2:
         sys.exit("usage: release_notes.py <version>")
+    version = sys.argv[1]
+    notes = extract_notes(DEVLOG_PATH.read_text(encoding="utf-8"), version)
+    # A release without its changelog entry is a missed DEVLOG update; fail loudly.
+    if not notes:
+        sys.exit(f"DEVLOG.md has no changelog entry for v{version}")
     sys.stdout.reconfigure(encoding="utf-8")
-    print(extract_notes(DEVLOG_PATH.read_text(encoding="utf-8"), sys.argv[1]), end="")
+    print(notes, end="")
 
 
 if __name__ == "__main__":

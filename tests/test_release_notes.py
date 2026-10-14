@@ -1,6 +1,10 @@
 """Tests for release_notes.extract_notes."""
 
-from release_notes import extract_notes
+import sys
+
+import pytest
+
+from release_notes import extract_notes, main
 
 DEVLOG = """## Changelog
 
@@ -33,3 +37,9 @@ def test_last_entry_stops_at_next_section():
 
 def test_missing_version_returns_empty():
     assert extract_notes(DEVLOG, "9.9.9") == ""
+
+
+def test_cli_fails_when_entry_is_missing(monkeypatch):
+    monkeypatch.setattr(sys, "argv", ["release_notes.py", "0.0.0"])
+    with pytest.raises(SystemExit, match="no changelog entry"):
+        main()

@@ -17,13 +17,9 @@ on:
       - "release_notes.py"
       - "requirements.txt"
 
+# Only the publish job gets write access.
 permissions:
-  contents: write
-
-# Two quick merges must not race to create the same release.
-concurrency:
-  group: build-windows-${{ github.ref }}
-  cancel-in-progress: false
+  contents: read
 
 jobs:
   check:
@@ -42,14 +38,19 @@ jobs:
           echo "App version: $version"
 
       # A release happens once per version: merges that don't bump
-      # CURRENT_VERSION find the tag already there and skip the build.
+      # CURRENT_VERSION find the release (with its zip) already there and
+      # skip the build. A release missing its zip is rebuilt and re-uploaded.
       - name: Decide whether to release
         id: release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ steps.version.outputs.version }}
         run: |
+          zip="SC_Signature_Scanner_v${VERSION}.zip"
           if [ "$GITHUB_EVENT_NAME" != "push" ]; then
             echo "release=false" >> "$GITHUB_OUTPUT"
-          elif git ls-remote --exit-code --tags origin "refs/tags/v${{ steps.version.outputs.version }}" > /dev/null; then
-            echo "Tag v${{ steps.version.outputs.version }} already exists; nothing to release."
+          elif gh release view "v${VERSION}" --repo "$GITHUB_REPOSITORY" --json assets --jq '.assets[].name' 2>/dev/null | grep -qxF "$zip"; then
+            echo "Release v${VERSION} already has ${zip}; nothing to release."
             echo "release=false" >> "$GITHUB_OUTPUT"
           else
             echo "release=true" >> "$GITHUB_OUTPUT"
@@ -87,17 +88,34 @@ jobs:
           path: dist/SC_Signature_Scanner_v${{ env.VERSION }}.zip
           if-no-files-found: error
 
-      # bash redirects Python's UTF-8 bytes untouched; pwsh would re-encode them.
+  publish:
+    needs: [check, build]
+    if: needs.check.outputs.release == 'true'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    # Runs for the same version (re-pushes without a bump) queue rather than
+    # race; different versions never share a group, so none is dropped.
+    concurrency:
+      group: release-v${{ needs.check.outputs.version }}
+      cancel-in-progress: false
+    env:
+      VERSION: ${{ needs.check.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+
       - name: Write release notes
-        shell: bash
         run: |
-          python release_notes.py "$VERSION" > release_notes.md
+          python3 release_notes.py "$VERSION" > release_notes.md
           cat release_notes.md
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: SC_Signature_Scanner_v${{ env.VERSION }}
 
       # Notes = this version's DEVLOG entry, followed by GitHub's list of
       # PRs merged since the previous release.
       - name: Publish GitHub Release
-        if: needs.check.outputs.release == 'true'
         uses: softprops/action-gh-release@v2
         with:
           tag_name: v${{ env.VERSION }}
@@ -105,4 +123,4 @@ jobs:
           name: v${{ env.VERSION }}
           body_path: release_notes.md
           generate_release_notes: true
-          files: dist/SC_Signature_Scanner_v${{ env.VERSION }}.zip
+          files: SC_Signature_Scanner_v${{ env.VERSION }}.zip

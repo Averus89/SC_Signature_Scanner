@@ -55,6 +55,7 @@ The devlog shall always contain a clear "Current Status" or "Next Steps" section
 - Every merge to `master` whose `version_checker.CURRENT_VERSION` has no `v<version>` tag yet builds the zip and publishes a GitHub Release with that tag. Merges that don't bump the version skip the build.
 - Release notes are this version's DEVLOG changelog entry (new `release_notes.py`) followed by GitHub's generated list of merged PRs. The in-app update checker reads `releases/latest`.
 - Also runs on manual dispatch and on PRs that touch the spec, `build.py`, `release_notes.py`, `requirements.txt` or the workflow (artifact only, no release).
+- Only the Ubuntu `publish` job has `contents: write`; `check` and the Windows `build` (which installs third-party packages) run read-only. A release missing its zip counts as unreleased, so the next master push re-uploads it. `release_notes.py` exits non-zero when the version has no DEVLOG entry.
 - `build.py` no longer opens Explorer on the dist folder when `CI` is set.
 - Release flow: bump `CURRENT_VERSION`, add the DEVLOG entry, merge.
 
